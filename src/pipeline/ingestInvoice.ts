@@ -175,6 +175,7 @@ async function finalizeUnextractable(params: {
     categoryConfidence: null,
     categorySource: null,
     allocationRequired: false,
+    businessRatio: null,
     multiPageTotalMismatch: false,
     pageCount: params.pageCount,
     description: null,
@@ -257,8 +258,18 @@ async function finalizeExtracted(params: {
   const category = suggestion.category ?? parsed.category;
   const categorySource = suggestion.source ?? (parsed.category ? 'rule' : null);
   const allocationRequired = direction === 'expense' && isAllocationProne(category);
+  let businessRatio: number | null = null;
   if (allocationRequired) {
-    notes.push(`「${category}」は家事按分が必要になりやすい科目です。自動計算はせず、按分ルール設定画面での確認を推奨します。`);
+    if (vendor?.defaultBusinessRatio != null) {
+      businessRatio = vendor.defaultBusinessRatio;
+      notes.push(
+        `「${category}」は家事按分の対象科目です。取引先「${vendorName}」に設定済みの事業按分比率 ${Math.round(businessRatio * 100)}% を案として適用しました。按分ルール設定画面で確認してください。`
+      );
+    } else {
+      notes.push(
+        `「${category}」は家事按分の対象科目です。この取引先の按分比率が未設定のため、按分ルール設定画面（/vendors.html）で設定してください。`
+      );
+    }
   }
 
   // 6. 外貨判定
@@ -303,6 +314,7 @@ async function finalizeExtracted(params: {
     categoryConfidence: suggestion.confidence || null,
     categorySource,
     allocationRequired,
+    businessRatio,
     multiPageTotalMismatch: params.multiPageMismatch,
     pageCount: params.pageCount,
     description: parsed.description || null,

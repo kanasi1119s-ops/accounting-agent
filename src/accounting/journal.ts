@@ -15,6 +15,14 @@ export interface LedgerSourceInvoice {
   vendorName: string | null;
   paymentMethod: string | null;
   description: string | null;
+  /** 家事按分比率（0-1）。未設定（null）は100%（按分なし）として扱う。 */
+  businessRatio: number | null;
+}
+
+/** 家事按分後の税込金額。「ソロAI帳簿」の businessTotal() 相当。 */
+export function businessTotal(inv: LedgerSourceInvoice): number {
+  const ratio = typeof inv.businessRatio === 'number' ? Math.min(1, Math.max(0, inv.businessRatio)) : 1;
+  return Math.round(inv.amountInclTax * ratio);
 }
 
 export interface JournalLine {
@@ -49,7 +57,7 @@ export function normalizeSettlement(raw: string | null, direction: 'income' | 'e
 export function toJournalEntry(inv: LedgerSourceInvoice): JournalEntry {
   const settlement = normalizeSettlement(inv.paymentMethod, inv.direction);
   const category = inv.category || (inv.direction === 'income' ? '売上高' : '雑費');
-  const gross = Math.round(inv.amountInclTax);
+  const gross = businessTotal(inv);
 
   const lines: JournalLine[] =
     inv.direction === 'expense'
@@ -89,7 +97,7 @@ export function computeProfitLoss(invoices: LedgerSourceInvoice[]): ProfitLoss {
 
   for (const inv of invoices) {
     const key = inv.category || (inv.direction === 'income' ? '売上高' : '雑費');
-    const value = Math.round(inv.amountInclTax);
+    const value = businessTotal(inv);
     if (inv.direction === 'income') {
       revenueByAccount[key] = (revenueByAccount[key] || 0) + value;
     } else {
@@ -119,7 +127,7 @@ export function computeByCounterparty(
     if (inv.direction !== direction) continue;
     const name = (inv.vendorName || '').trim() || '（取引先未確定）';
     const cur = map.get(name) || { amount: 0, count: 0 };
-    cur.amount += Math.round(inv.amountInclTax);
+    cur.amount += businessTotal(inv);
     cur.count += 1;
     map.set(name, cur);
   }
@@ -144,7 +152,7 @@ export function computeMonthly(invoices: LedgerSourceInvoice[]): MonthlySummary[
   for (const inv of invoices) {
     const m = Number((inv.issueDate || '').slice(5, 7));
     if (!m || m < 1 || m > 12) continue;
-    const value = Math.round(inv.amountInclTax);
+    const value = businessTotal(inv);
     if (inv.direction === 'income') months[m - 1].revenue += value;
     else months[m - 1].expense += value;
   }

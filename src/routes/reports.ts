@@ -49,5 +49,6 @@ function toLedgerSource(row: any): LedgerSourceInvoice {
     vendorName: row.vendor_name,
     paymentMethod: row.payment_method,
     description: row.description,
+    businessRatio: row.business_ratio === null ? null : Number(row.business_ratio),
   };
 }

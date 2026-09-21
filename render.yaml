@@ -1,8 +1,8 @@
-databases:
-  - name: accounting-agent-db
-    plan: free
-    region: singapore
-
+# 実際の本番運用ではRenderの自前Postgres(databases:ブロック)は使っていない。
+# Render Postgresの無料プランは30日で自動削除されるため、削除期限のないNeon
+# (https://neon.tech, GitHubログインで作成)の無料DBをDATABASE_URLとして
+# 手動で設定している。このBlueprintをそのまま適用する場合は、Apply後に
+# ダッシュボードのEnvironmentタブでDATABASE_URLをNeonの接続文字列に書き換えること。
 services:
   - type: web
     name: accounting-agent
@@ -13,9 +13,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: accounting-agent-db
-          property: connectionString
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: PORT

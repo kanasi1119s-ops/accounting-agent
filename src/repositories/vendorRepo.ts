@@ -7,14 +7,19 @@ export interface Vendor {
   defaultCategory: string | null;
   invoiceRegistrationNumber: string | null;
   registrationStatus: 'registered' | 'exempt' | 'unknown';
+  defaultBusinessRatio: number | null;
 }
 
+const VENDOR_COLUMNS = `id, name, default_category, invoice_registration_number, registration_status, default_business_ratio`;
+
 export async function findVendorByName(name: string): Promise<Vendor | null> {
-  const { rows } = await pool.query(
-    `SELECT id, name, default_category, invoice_registration_number, registration_status
-     FROM vendors WHERE name = $1`,
-    [name]
-  );
+  const { rows } = await pool.query(`SELECT ${VENDOR_COLUMNS} FROM vendors WHERE name = $1`, [name]);
+  if (rows.length === 0) return null;
+  return mapVendor(rows[0]);
+}
+
+export async function findVendorById(id: string): Promise<Vendor | null> {
+  const { rows } = await pool.query(`SELECT ${VENDOR_COLUMNS} FROM vendors WHERE id = $1`, [id]);
   if (rows.length === 0) return null;
   return mapVendor(rows[0]);
 }
@@ -26,10 +31,20 @@ export async function findOrCreateVendorByName(name: string): Promise<Vendor> {
   const { rows } = await pool.query(
     `INSERT INTO vendors (name) VALUES ($1)
      ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-     RETURNING id, name, default_category, invoice_registration_number, registration_status`,
+     RETURNING ${VENDOR_COLUMNS}`,
     [name]
   );
   return mapVendor(rows[0]);
+}
+
+export async function listVendors(): Promise<Vendor[]> {
+  const { rows } = await pool.query(`SELECT ${VENDOR_COLUMNS} FROM vendors ORDER BY name`);
+  return rows.map(mapVendor);
+}
+
+/** 按分ルール設定画面から呼ばれる。この取引先の今後の取込に適用するデフォルト事業按分比率を設定する。 */
+export async function updateVendorDefaultBusinessRatio(id: string, ratio: number | null): Promise<void> {
+  await pool.query(`UPDATE vendors SET default_business_ratio = $2, updated_at = now() WHERE id = $1`, [id, ratio]);
 }
 
 export async function getVendorCategoryHistory(vendorId: string): Promise<VendorCategoryHistoryEntry[]> {
@@ -58,5 +73,6 @@ function mapVendor(row: any): Vendor {
     defaultCategory: row.default_category,
     invoiceRegistrationNumber: row.invoice_registration_number,
     registrationStatus: row.registration_status,
+    defaultBusinessRatio: row.default_business_ratio === null ? null : Number(row.default_business_ratio),
   };
 }

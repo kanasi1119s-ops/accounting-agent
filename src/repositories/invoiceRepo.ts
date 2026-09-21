@@ -39,6 +39,7 @@ export interface NewInvoiceRecord {
   categoryConfidence: number | null;
   categorySource: 'vendor_history' | 'keyword_guess' | 'rule' | 'manual' | null;
   allocationRequired: boolean;
+  businessRatio: number | null;
 
   multiPageTotalMismatch: boolean;
   pageCount: number | null;
@@ -66,7 +67,7 @@ export async function insertInvoice(rec: NewInvoiceRecord): Promise<string> {
       source_file_path, source_file_hash, dedup_hash, duplicate_of_invoice_id,
       extraction_method, ocr_raw_json, ocr_confidence,
       tax_consistency_status,
-      category, category_confidence, category_source, allocation_required,
+      category, category_confidence, category_source, allocation_required, business_ratio,
       multi_page_total_mismatch, page_count,
       description, payment_method,
       status
@@ -79,10 +80,10 @@ export async function insertInvoice(rec: NewInvoiceRecord): Promise<string> {
       $19, $20, $21, $22,
       $23, $24::jsonb, $25,
       $26,
-      $27, $28, $29, $30,
-      $31, $32,
-      $33, $34,
-      $35
+      $27, $28, $29, $30, $31,
+      $32, $33,
+      $34, $35,
+      $36
     ) RETURNING id`,
     [
       rec.vendorId, rec.vendorNameRaw, rec.direction, rec.documentType,
@@ -93,7 +94,7 @@ export async function insertInvoice(rec: NewInvoiceRecord): Promise<string> {
       rec.sourceFilePath, rec.sourceFileHash, rec.dedupHash, rec.duplicateOfInvoiceId,
       rec.extractionMethod, rec.ocrRawJson ? JSON.stringify(rec.ocrRawJson) : null, rec.ocrConfidence,
       rec.taxConsistencyStatus,
-      rec.category, rec.categoryConfidence, rec.categorySource, rec.allocationRequired,
+      rec.category, rec.categoryConfidence, rec.categorySource, rec.allocationRequired, rec.businessRatio,
       rec.multiPageTotalMismatch, rec.pageCount,
       rec.description, rec.paymentMethod,
       rec.status,

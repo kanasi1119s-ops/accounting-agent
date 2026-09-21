@@ -5,6 +5,7 @@ import { invoicesRouter } from './routes/invoices.js';
 import { approvalsRouter } from './routes/approvals.js';
 import { settingsRouter } from './routes/settings.js';
 import { reportsRouter } from './routes/reports.js';
+import { vendorsRouter } from './routes/vendors.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -25,6 +26,7 @@ app.use('/api/invoices', invoicesRouter(UPLOAD_DIR));
 app.use('/api/approvals', approvalsRouter());
 app.use('/api/settings', settingsRouter());
 app.use('/api/reports', reportsRouter());
+app.use('/api/vendors', vendorsRouter());
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`accounting-agent server running on http://0.0.0.0:${PORT}`);

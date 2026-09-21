@@ -50,7 +50,7 @@ npm run dev
 - `src/pipeline/ingestInvoice.ts` — OCR取込 → 検証 → 仕訳提案 → 承認キュー投入までを一気通貫で行うオーケストレーター。
 - `src/routes/` — Express APIルート（アップロード、承認、設定、レポート）。
 - `src/repositories/` — DBアクセス層。
-- `public/` — 承認キュー用の簡易画面（ビルド不要のvanilla HTML/JS）。`index.html` が一覧・取込・設定、`invoice.html` が証憑1件の詳細・手動修正・外貨レート指定。
+- `public/` — 承認キュー用の簡易画面（ビルド不要のvanilla HTML/JS）。`index.html` が一覧・取込・設定、`invoice.html` が証憑1件の詳細・手動修正・外貨レート指定、`vendors.html` が按分ルール設定。
 
 ## パイプラインの処理分岐
 
@@ -67,6 +67,14 @@ npm run dev
 - インボイス番号の形式不正・未登録事業者 → 経過措置控除率（80%/50%/0%）を算出するだけで、税額は書き換えない
 - 重複請求書検知（発行日+取引先+金額のハッシュ）→ `duplicate_flagged` として承認キューに乗せる（自動棄却はしない）
 
+## 按分ルール設定（家事按分）
+
+水道光熱費・通信費・地代家賃・車両費・旅費交通費など、事業とプライベートの按分が必要になりやすい科目（`src/accounting/accounts.ts` の `ALLOCATION_PRONE_CATEGORIES`）に該当する取引を取り込むと `allocation_required = true` になり、承認キューに `allocation_required` 理由が付く。
+
+- 按分の**自動計算はしない**。[/vendors.html](public/vendors.html) で取引先ごとにデフォルトの事業按分比率（0-100%）を設定でき、次回以降その取引先の証憑を取り込んだときに「案」として `invoices.business_ratio` に複写されるだけ
+- 未設定の場合は `business_ratio = null`（=100%として扱われるが要確認）のまま承認キューに乗るので、承認前に [invoice.html](public/invoice.html) の詳細画面から個別に比率を修正できる
+- 決算集計（`src/accounting/journal.ts` の `businessTotal()`）は `status = 'approved'` の証憑についてのみ、この比率を金額に乗じて損益計算・仕訳・取引先別集計に反映する
+
 ## 「ソロAI帳簿」からの移植状況
 
 | 機能 | 移植元 | 状況 |
@@ -77,20 +85,29 @@ npm run dev
 | 経過措置による仕入税額控除率の自動判定 | — | 元コードに実装なし。新規実装 |
 | 取引先履歴ベースの勘定科目自動提案（信頼度スコア付き） | — | 元コードはユーザー定義ルールのマッチングのみで履歴学習なし。新規実装 (`src/accounting/categorySuggestion.ts`) |
 
-## デプロイ
+## デプロイ（現在の本番構成）
 
-当初はFly.ioを想定していたが、新規Fly組織は支払い方法（カード）登録前だとMachineを作成できない制限があるため、カード登録不要で始められる **Render** を先に使う運用に切り替えた。`fly.toml` は残してあるので、カード登録後にFly.ioへ切り替えることも可能。
+**すべて無料プランのみで運用している**（課金は一切発生させない方針）。
 
-### Render（現在の想定）
+- **Web**: [Render](https://render.com) の無料Webサービス（`accounting-agent`、Singaporeリージョン）
+  - デプロイURL: https://accounting-agent-bhlz.onrender.com
+  - Renderダッシュボード: https://dashboard.render.com/web/srv-daojjsmgekts73chv7q0
+  - GitHub `main` ブランチへのpushで自動デプロイ（`autoDeploy: yes`）
+- **DB**: [Neon](https://neon.tech) の無料Postgres（GitHubログインで作成、プロジェクトID `dry-dew-38244877`、Singaporeリージョン）
+  - Render自前のPostgres無料プランは**30日で自動削除**されるため使っていない。Neonの無料プランは削除期限がない（コンピュートは非アクティブ時にスケール to zeroするだけでデータは消えない）
+  - `DATABASE_URL` はRenderのWeb ServiceのEnvironmentタブに直接手入力で設定している（Neonの接続文字列はダッシュボードの「Connect」からのみ確認できる。エージェントは秘密情報を扱わない方針のため、この値の入力は常にユーザー自身が行う）
+- Fly.ioは当初の想定だったが、新規組織は支払い方法（カード）登録前だとMachineを作成できない制限があり保留中。`fly.toml` は残してあるので、カード登録後に切り替えも可能（下記）
 
-リポジトリ直下の `render.yaml` を使い、Render の Blueprint機能でWebサービスとPostgresを一括作成する。
-
-1. Render ダッシュボード → New → Blueprint → このGitHubリポジトリを選択
-2. `render.yaml` の内容がプレビューされるので確認して Apply
-3. 作成後、Web ServiceのEnvironmentタブで `GEMINI_API_KEY` を設定（`sync: false` のため自動では入らない）
-4. デプロイ完了後、コンテナ起動コマンドが `migrate` → `server` の順で実行されるため、マイグレーション適用漏れは発生しない
+環境変数を変更する場合は Render ダッシュボード → `accounting-agent` → Environment → Edit で編集し、Saveすると自動で再ビルド・再デプロイされる。デプロイ時のコンテナ起動コマンドが `migrate` → `server` の順で実行されるため、マイグレーション適用漏れは発生しない。
 
 **既知の制約**: Renderの無料プランは永続ディスクに対応していないため、`UPLOAD_DIR=/tmp/uploads` はコンテナ再起動・再デプロイのたびに消える。元ファイル（レシート画像等）を長期保存したい場合は、有料プランでディスクを追加するか、S3/R2などのオブジェクトストレージに切り替える必要がある（`source_file_path` を保存しているだけの `src/pipeline/ingestInvoice.ts` の `saveUploadedFile` を差し替えれば対応可能）。
+
+### render.yaml から作り直す場合
+
+リポジトリ直下の `render.yaml` を使い、Render の Blueprint機能でWebサービスを作成できる（Postgresは含めていない。上記の理由でNeon等の削除期限なし無料DBを別途用意し、Apply後にDATABASE_URLを手動設定すること）。
+
+1. Render ダッシュボード → New → Blueprint → このGitHubリポジトリを選択 → Apply
+2. Web ServiceのEnvironmentタブで `DATABASE_URL`（Neon等の接続文字列）と `GEMINI_API_KEY` を設定（どちらも `sync: false` のため自動では入らない）
 
 ### Fly.io（カード登録後の代替手段）
 
@@ -105,7 +122,6 @@ fly deploy
 
 ## 未実装（今回のスコープ外・将来拡張）
 
-- 按分ルール設定画面（現状は「按分が必要」という警告フラグ (`allocation_required`) が付くだけで、按分ルールの登録・自動計算画面はない）
 - 認証（現状は単一運用者を想定し、`approver` は画面の自己申告テキスト入力で、ログイン機構はない）
 - 会計ソフトAPI（freee/マネーフォワード等）への自動仕訳登録
 - 複数事業者・複数拠点対応、`invoice-estimate-tool` との統合

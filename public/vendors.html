@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>按分ルール設定 — accounting-agent</title>
+<style>
+  :root { --border: #dfe3e8; --muted: #6b7280; --accent: #4f46e5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; background: #f5f6f8; color: #1f2937; }
+  header { background: #111827; color: white; padding: 16px 24px; }
+  header a { color: #93c5fd; text-decoration: none; font-size: 13px; }
+  header h1 { font-size: 16px; margin: 8px 0 0; font-weight: 700; }
+  header .sub { font-size: 12px; color: #9ca3af; }
+  main { max-width: 800px; margin: 0 auto; padding: 20px 16px 60px; }
+  section { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eee; }
+  th { color: var(--muted); font-weight: 700; font-size: 12px; }
+  input[type=number] { width: 90px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+  input[type=text] { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 160px; }
+  button { border: none; border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; background: var(--accent); color: white; }
+  .empty { color: var(--muted); font-size: 13px; padding: 16px 4px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #111827; color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.2s; }
+  .toast.show { opacity: 1; }
+  .hint { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← 承認キュー一覧へ戻る</a>
+  <h1>按分ルール設定</h1>
+  <div class="sub">水道光熱費・通信費・地代家賃・車両費・旅費交通費など、家事按分が必要になりやすい科目の取引先について、事業按分比率（0〜100%）を取引先ごとに設定します。ここで設定した比率は、次回以降その取引先の証憑を取り込んだときに「案」として自動で反映されます（自動計算・自動承認はしません。必ず承認画面で確認してください）。</div>
+</header>
+<main>
+  <section>
+    <div style="margin-bottom:10px;">
+      担当者名: <input type="text" id="approver" placeholder="例: 旭洋平" />
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>取引先名</th>
+          <th>デフォルト勘定科目</th>
+          <th>インボイス登録状況</th>
+          <th>事業按分比率</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="vendorRows"></tbody>
+    </table>
+    <div id="emptyMsg" class="empty" style="display:none;">取引先はまだ登録されていません。証憑を取り込むと自動で追加されます。</div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+function getApprover() {
+  const el = document.getElementById('approver');
+  const v = el.value.trim();
+  if (!v) {
+    toast('担当者名を入力してください');
+    el.focus();
+    return null;
+  }
+  localStorage.setItem('approverName', v);
+  return v;
+}
+
+const REG_STATUS_LABELS = { registered: '登録済み', exempt: '未登録（免税事業者等）', unknown: '不明' };
+
+async function load() {
+  const res = await fetch('/api/vendors');
+  const json = await res.json();
+  const tbody = document.getElementById('vendorRows');
+  tbody.innerHTML = '';
+
+  if (!json.success || json.data.length === 0) {
+    document.getElementById('emptyMsg').style.display = 'block';
+    return;
+  }
+  document.getElementById('emptyMsg').style.display = 'none';
+
+  for (const v of json.data) {
+    const tr = document.createElement('tr');
+    const ratioPercent = v.defaultBusinessRatio === null ? '' : Math.round(v.defaultBusinessRatio * 100);
+    tr.innerHTML = `
+      <td>${v.name}</td>
+      <td>${v.defaultCategory || '<span class="hint">未設定</span>'}</td>
+      <td>${REG_STATUS_LABELS[v.registrationStatus] || v.registrationStatus}</td>
+      <td>
+        <input type="number" min="0" max="100" step="1" value="${ratioPercent}" placeholder="未設定" data-vendor-id="${v.id}" /> %
+      </td>
+      <td><button data-vendor-id="${v.id}">保存</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  tbody.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => saveRatio(btn.dataset.vendorId, tbody));
+  });
+}
+
+async function saveRatio(vendorId, tbody) {
+  const approver = getApprover();
+  if (!approver) return;
+
+  const input = tbody.querySelector(`input[data-vendor-id="${vendorId}"]`);
+  const raw = input.value.trim();
+  const ratio = raw === '' ? null : Math.min(100, Math.max(0, Number(raw))) / 100;
+
+  const res = await fetch(`/api/vendors/${vendorId}/default-business-ratio`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ratio, changedBy: approver }),
+  });
+  const json = await res.json();
+  toast(json.success ? '按分比率を保存しました' : 'エラー: 保存に失敗しました');
+}
+
+const savedApprover = localStorage.getItem('approverName');
+if (savedApprover) document.getElementById('approver').value = savedApprover;
+
+load();
+</script>
+</body>
+</html>

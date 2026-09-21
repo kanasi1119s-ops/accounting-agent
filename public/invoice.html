@@ -61,6 +61,7 @@ const EDITABLE_FIELDS = [
   ['taxRate', '税率 (0.1 / 0.08)', 'number'],
   ['invoiceRegistrationNumber', 'インボイス登録番号', 'text'],
   ['category', '勘定科目', 'text'],
+  ['businessRatio', '事業按分比率 (0-1、空欄=按分なし100%)', 'number'],
   ['paymentMethod', '支払方法', 'text'],
   ['description', '摘要', 'text'],
 ];
@@ -95,7 +96,7 @@ async function load() {
     ['categoryConfidence', '科目信頼度'], ['categorySource', '科目提案元'], ['ocrConfidence', 'OCR信頼度'],
     ['multiPageTotalMismatch', '複数ページ不一致'], ['duplicateOfInvoiceId', '重複元ID'],
     ['deemedDeductionRate', '経過措置控除率'], ['vendorRegistrationStatusAtTxn', '取引先登録状況'],
-    ['currency', '通貨'],
+    ['currency', '通貨'], ['allocationRequired', '家事按分の検討が必要'],
   ];
   for (const [key, label] of readOnly) {
     const div = document.createElement('div');
