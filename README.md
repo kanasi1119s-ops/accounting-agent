@@ -7,7 +7,7 @@
 ## 段階的リリース方針
 
 - **フェーズ1（現在）**: OCR抽出 → 検証 → 仕訳提案までは自動化するが、**自動仕訳・自動承認は一切行わない**。すべて `approval_queue` に入り、人間の確認・承認を待つ。
-- **フェーズ2**: `settings.auto_approval_enabled` を有効化すると、信頼度が高い（`category_confidence_threshold` 以上）案件だけワンクリック承認UIの対象にできる（UI側は未実装、APIの土台のみ用意）。
+- **フェーズ2**: `settings.auto_approval_enabled` を有効化すると、信頼度が高い（`category_confidence_threshold` 以上）案件だけワンクリック承認の対象にできる想定（現在の `public/index.html` は信頼度に関わらず一律で人間の承認ボタンを要求する作りなので、UI側の一括承認導線は未実装）。
 - **フェーズ3**: `settings.full_auto_enabled` を有効化すると、閾値未満の完全自動仕訳が視野に入る。旭身体LABOでの運用実績を見てから判断する。
 
 ## セットアップ
@@ -19,6 +19,27 @@ npm install
 npm run migrate   # migrations/ 配下のSQLを順番に適用
 npm run dev
 ```
+
+起動後 `http://localhost:3000/` で承認キュー画面が開く（`npm run dev` はAPIとUIを同じポートで配信する）。
+
+### ローカル動作確認用に作成した使い捨てPostgresクラスタ
+
+システムのPostgreSQL 18サービス（Windowsサービス、パスワード不明）とは別に、動作確認のためだけの専用クラスタを作成済み:
+
+- データディレクトリ: `C:\Users\fujik\accounting-agent-pgdata`
+- ポート: `5433`（システム標準の5432とは別）
+- 認証: `--auth=trust`（パスワード不要）— **ローカル専用の使い捨て設定。外部公開・本番には絶対に使わないこと**
+- `.env` の `DATABASE_URL=postgres://postgres@localhost:5433/accounting_agent` はこのクラスタを指している
+
+起動・停止:
+```bash
+# 起動
+"C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe" start -D "C:\Users\fujik\accounting-agent-pgdata" -o "-p 5433" -l "C:\Users\fujik\accounting-agent-pgdata\server.log"
+# 停止
+"C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe" stop -D "C:\Users\fujik\accounting-agent-pgdata"
+```
+
+本番（Render/Fly.io）は別途マネージドPostgresを使うため、このクラスタは動作確認専用。不要になれば `accounting-agent-pgdata` フォルダごと削除してよい。
 
 ## 主要なディレクトリ
 
