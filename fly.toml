@@ -1,0 +1,24 @@
+# fly launch で生成される app 名が衝突する場合は書き換えてください。
+app = "accounting-agent"
+primary_region = "nrt"
+
+[build]
+
+[env]
+  PORT = "3000"
+  UPLOAD_DIR = "/data/uploads"
+
+[[mounts]]
+  source = "accounting_agent_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
