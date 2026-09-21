@@ -1,4 +1,11 @@
-import { Pool } from 'pg';
+import pg from 'pg';
+
+const { Pool, types } = pg;
+
+// DATE型(oid 1082)をJSのDateオブジェクトに変換させない。
+// pgのデフォルト実装は年月日をローカルタイムゾーンの深夜として組み立てるため、
+// JST環境ではUTCに変換される際に日付が1日ずれる。"YYYY-MM-DD"の文字列のまま扱う。
+types.setTypeParser(1082, (value: string) => value);
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {

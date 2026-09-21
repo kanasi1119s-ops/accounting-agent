@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>証憑詳細 — accounting-agent</title>
+<style>
+  :root { --border: #dfe3e8; --muted: #6b7280; --accent: #4f46e5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; background: #f5f6f8; color: #1f2937; }
+  header { background: #111827; color: white; padding: 14px 24px; }
+  header a { color: #93c5fd; text-decoration: none; font-size: 13px; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
+  section { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
+  .field { display: grid; grid-template-columns: 160px 1fr; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed #eee; font-size: 13px; }
+  .field label { color: var(--muted); }
+  input, select, textarea { font: inherit; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 100%; }
+  button { border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer; background: var(--accent); color: white; margin-top: 10px; }
+  img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #111827; color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.2s; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← 承認キュー一覧へ戻る</a>
+  <span style="float:right; font-size:13px;">
+    担当者名: <input type="text" id="approver" placeholder="例: 旭洋平" style="width:140px;" />
+  </span>
+</header>
+<main>
+  <section>
+    <h2>証憑の内容</h2>
+    <div id="fields"></div>
+    <button id="saveBtn">この内容で保存（監査ログに記録されます）</button>
+  </section>
+  <section id="fxSection" style="display:none;">
+    <h2>外貨換算レートの指定</h2>
+    <div class="field"><label>レート</label><input type="number" id="fxRate" step="0.0001" /></div>
+    <div class="field"><label>レート取得日</label><input type="date" id="fxRateDate" /></div>
+    <div class="field"><label>換算方法</label>
+      <select id="fxMethod">
+        <option value="ttm">TTM（仲値）</option>
+        <option value="tts">TTS（対顧客電信売相場）</option>
+        <option value="ttb">TTB（対顧客電信買相場）</option>
+      </select>
+    </div>
+    <button id="fxSaveBtn">為替情報を保存</button>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const id = new URLSearchParams(location.search).get('id');
+const EDITABLE_FIELDS = [
+  ['vendorNameRaw', '取引先名', 'text'],
+  ['issueDate', '発行日', 'date'],
+  ['amountExclTax', '税抜金額', 'number'],
+  ['taxAmount', '消費税額', 'number'],
+  ['amountInclTax', '税込金額', 'number'],
+  ['taxRate', '税率 (0.1 / 0.08)', 'number'],
+  ['invoiceRegistrationNumber', 'インボイス登録番号', 'text'],
+  ['category', '勘定科目', 'text'],
+  ['paymentMethod', '支払方法', 'text'],
+  ['description', '摘要', 'text'],
+];
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+function camelFromSnake(s) {
+  return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+async function load() {
+  const res = await fetch(`/api/invoices/${id}`);
+  const json = await res.json();
+  if (!json.success) {
+    document.getElementById('fields').innerHTML = '<p>見つかりませんでした。</p>';
+    return;
+  }
+  const inv = json.data;
+  const camel = {};
+  for (const [k, v] of Object.entries(inv)) camel[camelFromSnake(k)] = v;
+
+  const container = document.getElementById('fields');
+  container.innerHTML = '';
+
+  const readOnly = [
+    ['status', '状態'], ['extractionMethod', '抽出方法'], ['taxConsistencyStatus', '税整合性'],
+    ['categoryConfidence', '科目信頼度'], ['categorySource', '科目提案元'], ['ocrConfidence', 'OCR信頼度'],
+    ['multiPageTotalMismatch', '複数ページ不一致'], ['duplicateOfInvoiceId', '重複元ID'],
+    ['deemedDeductionRate', '経過措置控除率'], ['vendorRegistrationStatusAtTxn', '取引先登録状況'],
+    ['currency', '通貨'],
+  ];
+  for (const [key, label] of readOnly) {
+    const div = document.createElement('div');
+    div.className = 'field';
+    div.innerHTML = `<label>${label}</label><span>${formatValue(camel[key])}</span>`;
+    container.appendChild(div);
+  }
+
+  for (const [key, label, type] of EDITABLE_FIELDS) {
+    const div = document.createElement('div');
+    div.className = 'field';
+    const value = camel[key] ?? '';
+    div.innerHTML = `<label>${label}</label><input data-field="${key}" type="${type}" value="${value}" ${type==='number' ? 'step=any' : ''} />`;
+    container.appendChild(div);
+  }
+
+  if (inv.currency && inv.currency !== 'JPY') {
+    document.getElementById('fxSection').style.display = 'block';
+    if (inv.fx_rate) document.getElementById('fxRate').value = inv.fx_rate;
+    if (inv.fx_rate_date) document.getElementById('fxRateDate').value = inv.fx_rate_date;
+    if (inv.fx_method) document.getElementById('fxMethod').value = inv.fx_method;
+  }
+
+  if (inv.source_file_path) {
+    const note = document.createElement('p');
+    note.style.fontSize = '12px';
+    note.style.color = '#6b7280';
+    note.textContent = `元ファイル: ${inv.source_file_path}`;
+    container.appendChild(note);
+  }
+}
+
+function formatValue(v) {
+  if (v === null || v === undefined || v === '') return '(未設定)';
+  if (typeof v === 'boolean') return v ? 'はい' : 'いいえ';
+  return String(v);
+}
+
+function getApprover() {
+  const el = document.getElementById('approver');
+  const v = el.value.trim();
+  if (!v) {
+    toast('担当者名を入力してください');
+    el.focus();
+    return null;
+  }
+  localStorage.setItem('approverName', v);
+  return v;
+}
+
+async function save() {
+  const fields = {};
+  document.querySelectorAll('#fields input[data-field]').forEach((input) => {
+    const val = input.value.trim();
+    if (val === '') return;
+    fields[input.dataset.field] = input.type === 'number' ? Number(val) : val;
+  });
+  const changedBy = getApprover();
+  if (!changedBy) return;
+
+  const res = await fetch(`/api/invoices/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ changedBy, reason: '証憑詳細画面からの手動修正', fields }),
+  });
+  const json = await res.json();
+  toast(json.success ? '保存しました' : 'エラー: 保存に失敗しました');
+  if (json.success) load();
+}
+
+async function saveFx() {
+  const fxRate = Number(document.getElementById('fxRate').value);
+  const fxRateDate = document.getElementById('fxRateDate').value;
+  const fxMethod = document.getElementById('fxMethod').value;
+  const changedBy = getApprover();
+  if (!fxRate || !fxRateDate || !changedBy) { toast('レート・取得日・担当者名は必須です'); return; }
+
+  const res = await fetch(`/api/invoices/${id}/fx`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fxRate, fxRateDate, fxMethod, changedBy }),
+  });
+  const json = await res.json();
+  toast(json.success ? '為替情報を保存しました' : 'エラー: 保存に失敗しました');
+}
+
+document.getElementById('saveBtn').addEventListener('click', save);
+document.getElementById('fxSaveBtn').addEventListener('click', saveFx);
+
+const savedApprover = localStorage.getItem('approverName');
+if (savedApprover) document.getElementById('approver').value = savedApprover;
+
+load();
+</script>
+</body>
+</html>

@@ -11,6 +11,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || './data/uploads');
 
 app.use(express.json({ limit: '5mb' }));
+app.use(express.static(path.resolve('public')));
 
 app.get('/api/health', (_req, res) => {
   res.json({

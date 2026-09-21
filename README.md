@@ -29,6 +29,7 @@ npm run dev
 - `src/pipeline/ingestInvoice.ts` — OCR取込 → 検証 → 仕訳提案 → 承認キュー投入までを一気通貫で行うオーケストレーター。
 - `src/routes/` — Express APIルート（アップロード、承認、設定、レポート）。
 - `src/repositories/` — DBアクセス層。
+- `public/` — 承認キュー用の簡易画面（ビルド不要のvanilla HTML/JS）。`index.html` が一覧・取込・設定、`invoice.html` が証憑1件の詳細・手動修正・外貨レート指定。
 
 ## パイプラインの処理分岐
 
@@ -55,7 +56,22 @@ npm run dev
 | 経過措置による仕入税額控除率の自動判定 | — | 元コードに実装なし。新規実装 |
 | 取引先履歴ベースの勘定科目自動提案（信頼度スコア付き） | — | 元コードはユーザー定義ルールのマッチングのみで履歴学習なし。新規実装 (`src/accounting/categorySuggestion.ts`) |
 
-## Fly.io へのデプロイ
+## デプロイ
+
+当初はFly.ioを想定していたが、新規Fly組織は支払い方法（カード）登録前だとMachineを作成できない制限があるため、カード登録不要で始められる **Render** を先に使う運用に切り替えた。`fly.toml` は残してあるので、カード登録後にFly.ioへ切り替えることも可能。
+
+### Render（現在の想定）
+
+リポジトリ直下の `render.yaml` を使い、Render の Blueprint機能でWebサービスとPostgresを一括作成する。
+
+1. Render ダッシュボード → New → Blueprint → このGitHubリポジトリを選択
+2. `render.yaml` の内容がプレビューされるので確認して Apply
+3. 作成後、Web ServiceのEnvironmentタブで `GEMINI_API_KEY` を設定（`sync: false` のため自動では入らない）
+4. デプロイ完了後、コンテナ起動コマンドが `migrate` → `server` の順で実行されるため、マイグレーション適用漏れは発生しない
+
+**既知の制約**: Renderの無料プランは永続ディスクに対応していないため、`UPLOAD_DIR=/tmp/uploads` はコンテナ再起動・再デプロイのたびに消える。元ファイル（レシート画像等）を長期保存したい場合は、有料プランでディスクを追加するか、S3/R2などのオブジェクトストレージに切り替える必要がある（`source_file_path` を保存しているだけの `src/pipeline/ingestInvoice.ts` の `saveUploadedFile` を差し替えれば対応可能）。
+
+### Fly.io（カード登録後の代替手段）
 
 ```bash
 fly launch --no-deploy   # fly.toml のapp名が衝突する場合はここで変更される
@@ -66,12 +82,10 @@ fly volumes create accounting_agent_data --size 1
 fly deploy
 ```
 
-デプロイ時のコンテナ起動コマンドが `migrate` を実行してから `server` を起動するため、マイグレーションの適用漏れは発生しない。
-
 ## 未実装（今回のスコープ外・将来拡張）
 
-- 承認キュー・按分ルール設定のフロントエンドUI（現状はAPIのみ）
-- 認証（現状は単一運用者を想定し、`approver` は自己申告の文字列）
+- 按分ルール設定画面（現状は「按分が必要」という警告フラグ (`allocation_required`) が付くだけで、按分ルールの登録・自動計算画面はない）
+- 認証（現状は単一運用者を想定し、`approver` は画面の自己申告テキスト入力で、ログイン機構はない）
 - 会計ソフトAPI（freee/マネーフォワード等）への自動仕訳登録
 - 複数事業者・複数拠点対応、`invoice-estimate-tool` との統合
 - スキャン画像PDF（複数ページ）のページ単位合計突き合わせ（現状はテキスト埋め込み型PDFのみ対応）

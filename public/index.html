@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>accounting-agent 承認キュー</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card-bg: #ffffff;
+    --border: #dfe3e8;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #4f46e5;
+    --danger: #dc2626;
+    --warn: #b45309;
+    --ok: #059669;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    background: #111827;
+    color: white;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; }
+  header .sub { font-size: 12px; color: #9ca3af; }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 20px 16px 80px;
+  }
+  section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  section h2 {
+    font-size: 14px;
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .approver-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+  }
+  input, select, textarea, button {
+    font: inherit;
+  }
+  input[type=text], input[type=number], select, textarea {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  button {
+    border: none;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .btn-approve { background: var(--ok); color: white; }
+  .btn-reject { background: var(--danger); color: white; }
+  .btn-info { background: #e5e7eb; color: var(--text); }
+  .btn-secondary { background: var(--accent); color: white; }
+  .btn-approve:disabled, .btn-reject:disabled, .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .vendor { font-weight: 700; font-size: 15px; }
+  .amount { font-size: 18px; font-weight: 800; }
+  .direction-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-right: 6px;
+  }
+  .direction-income { background: #d1fae5; color: #065f46; }
+  .direction-expense { background: #fee2e2; color: #991b1b; }
+  .reasons { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+  .reason-chip {
+    font-size: 11px;
+    background: #fef3c7;
+    color: var(--warn);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .meta { font-size: 12px; color: var(--muted); margin: 4px 0; }
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .empty { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #111827;
+    color: white;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  .upload-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .settings-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; font-size: 13px; align-items: center; }
+  .settings-grid .desc { color: var(--muted); font-size: 12px; grid-column: 1 / -1; margin-top: -4px; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>accounting-agent — 承認キュー</h1>
+    <div class="sub">フェーズ1: すべての証憑は人間の承認を経て記帳されます（自動仕訳なし）</div>
+  </div>
+  <div class="approver-row">
+    <label for="approver">担当者名:</label>
+    <input type="text" id="approver" placeholder="例: 旭洋平" />
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>証憑を取り込む</h2>
+    <div class="upload-row">
+      <select id="uploadDirection">
+        <option value="expense">支出（経費）</option>
+        <option value="income">収入（売上）</option>
+      </select>
+      <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,application/pdf" />
+      <button class="btn-secondary" id="uploadBtn">アップロードして取込</button>
+    </div>
+    <div class="upload-row" style="margin-top:10px;">
+      <textarea id="emailText" placeholder="メール本文など（金額のみ記載の場合はそのまま「手動入力待ち」で取り込まれます）" rows="2" style="flex:1; min-width:260px;"></textarea>
+      <button class="btn-secondary" id="textUploadBtn">テキストで取込</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>承認待ち一覧</h2>
+    <div id="queueList"><div class="empty">読み込み中...</div></div>
+  </section>
+
+  <section>
+    <h2>設定（信頼度・金額のしきい値）</h2>
+    <div id="settingsGrid" class="settings-grid"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const REASON_LABELS = {
+  phase1_all_pending: 'フェーズ1: 全件確認対象',
+  amount_threshold: '金額しきい値超過',
+  low_confidence: '科目の信頼度が低い',
+  invoice_requirement: 'インボイス番号の形式不正',
+  multi_page_mismatch: '複数ページ合計不一致',
+  duplicate: '重複の疑い',
+  tax_mismatch: '税抜税込の不整合',
+  foreign_currency: '外貨建て（レート要指定）',
+  allocation_required: '家事按分の検討が必要',
+  extraction_failed: '自動抽出不可（手動入力待ち）',
+};
+
+const SETTINGS_LABELS = {
+  category_confidence_threshold: '勘定科目 信頼度しきい値 (0-100)',
+  auto_approval_amount_threshold: '自動承認対象外とする金額しきい値 (円)',
+  auto_approval_enabled: 'フェーズ2: ワンクリック承認を有効化',
+  full_auto_enabled: 'フェーズ3: 完全自動仕訳を有効化',
+};
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+function getApprover() {
+  const el = document.getElementById('approver');
+  const v = el.value.trim();
+  if (!v) {
+    toast('担当者名を入力してください');
+    el.focus();
+    return null;
+  }
+  localStorage.setItem('approverName', v);
+  return v;
+}
+
+async function loadQueue() {
+  const res = await fetch('/api/approvals');
+  const json = await res.json();
+  const list = document.getElementById('queueList');
+  if (!json.success || json.data.length === 0) {
+    list.innerHTML = '<div class="empty">承認待ちの証憑はありません。</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const row of json.data) {
+    list.appendChild(renderCard(row));
+  }
+}
+
+function renderCard(row) {
+  const div = document.createElement('div');
+  div.className = 'card';
+
+  const amountText = row.amount_incl_tax !== null ? `¥${Number(row.amount_incl_tax).toLocaleString()}` : '(金額未確定)';
+  const directionClass = row.direction === 'income' ? 'direction-income' : 'direction-expense';
+  const directionLabel = row.direction === 'income' ? '収入' : '支出';
+
+  const reasonsHtml = (row.reasons || [])
+    .map((r) => `<span class="reason-chip">${REASON_LABELS[r] || r}</span>`)
+    .join('');
+
+  div.innerHTML = `
+    <div class="card-top">
+      <div>
+        <span class="direction-badge ${directionClass}">${directionLabel}</span>
+        <span class="vendor">${row.vendor_name_raw || '(取引先未確定)'}</span>
+        <div class="meta">発行日: ${row.issue_date || '(未確定)'} ／ 状態: ${row.invoice_status}</div>
+      </div>
+      <div class="amount">${amountText}</div>
+    </div>
+    <div class="reasons">${reasonsHtml}</div>
+    <div class="meta">
+      勘定科目:
+      <input type="text" class="category-input" value="${row.category || ''}" placeholder="未確定（手動で入力してください）" style="width:180px;" />
+    </div>
+    <textarea class="notes" placeholder="承認・差し戻しのメモ（差し戻し時は理由を必ず記入）" rows="2" style="width:100%; margin-top:6px;"></textarea>
+    <div class="card-actions">
+      <button class="btn-approve">承認</button>
+      <button class="btn-reject">差し戻し</button>
+      <button class="btn-info">要確認にする</button>
+      <a href="/invoice.html?id=${row.invoice_id}" style="font-size:12px; margin-left:auto;">詳細を見る →</a>
+    </div>
+  `;
+
+  div.querySelector('.btn-approve').addEventListener('click', () => decide(row.id, 'approved', div));
+  div.querySelector('.btn-reject').addEventListener('click', () => decide(row.id, 'rejected', div));
+  div.querySelector('.btn-info').addEventListener('click', () => decide(row.id, 'needs_info', div));
+
+  return div;
+}
+
+async function decide(approvalId, decision, cardEl) {
+  const approver = getApprover();
+  if (!approver) return;
+
+  const notes = cardEl.querySelector('.notes').value.trim();
+  const finalCategory = cardEl.querySelector('.category-input').value.trim();
+
+  if (decision === 'rejected' && !notes) {
+    toast('差し戻し理由をメモ欄に入力してください');
+    return;
+  }
+
+  const res = await fetch(`/api/approvals/${approvalId}/decide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision, approver, notes: notes || undefined, finalCategory: finalCategory || undefined }),
+  });
+  const json = await res.json();
+  if (json.success) {
+    toast(decision === 'approved' ? '承認しました' : decision === 'rejected' ? '差し戻しました' : '要確認にしました');
+    loadQueue();
+  } else {
+    toast('エラー: ' + (json.error || '不明なエラー'));
+  }
+}
+
+async function uploadFile() {
+  const fileInput = document.getElementById('fileInput');
+  const direction = document.getElementById('uploadDirection').value;
+  if (!fileInput.files[0]) {
+    toast('ファイルを選択してください');
+    return;
+  }
+  const form = new FormData();
+  form.append('file', fileInput.files[0]);
+  form.append('direction', direction);
+
+  toast('取込中...');
+  const res = await fetch('/api/invoices/upload', { method: 'POST', body: form });
+  const json = await res.json();
+  if (json.success) {
+    toast('取込完了（承認キューに追加されました）');
+    fileInput.value = '';
+    loadQueue();
+  } else {
+    toast('エラー: ' + (json.error || '取込に失敗しました'));
+  }
+}
+
+async function uploadText() {
+  const text = document.getElementById('emailText').value.trim();
+  const direction = document.getElementById('uploadDirection').value;
+  if (!text) {
+    toast('テキストを入力してください');
+    return;
+  }
+  const res = await fetch('/api/invoices/from-text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, direction }),
+  });
+  const json = await res.json();
+  if (json.success) {
+    toast('取込完了（手動入力待ちとして承認キューに追加されました）');
+    document.getElementById('emailText').value = '';
+    loadQueue();
+  } else {
+    toast('エラー: ' + (json.error || '取込に失敗しました'));
+  }
+}
+
+async function loadSettings() {
+  const res = await fetch('/api/settings');
+  const json = await res.json();
+  const grid = document.getElementById('settingsGrid');
+  grid.innerHTML = '';
+  for (const [key, value] of Object.entries(json.data)) {
+    const label = SETTINGS_LABELS[key] || key;
+    const row = document.createElement('div');
+    row.textContent = label;
+    const inputWrap = document.createElement('div');
+
+    if (typeof value === 'boolean') {
+      const select = document.createElement('select');
+      select.innerHTML = '<option value="true">有効</option><option value="false">無効</option>';
+      select.value = String(value);
+      select.addEventListener('change', () => updateSetting(key, select.value === 'true'));
+      inputWrap.appendChild(select);
+    } else {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.value = value;
+      input.style.width = '100px';
+      input.addEventListener('change', () => updateSetting(key, Number(input.value)));
+      inputWrap.appendChild(input);
+    }
+
+    grid.appendChild(row);
+    grid.appendChild(inputWrap);
+  }
+}
+
+async function updateSetting(key, value) {
+  const res = await fetch(`/api/settings/${key}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value }),
+  });
+  const json = await res.json();
+  toast(json.success ? '設定を更新しました' : 'エラー: 更新に失敗しました');
+}
+
+document.getElementById('uploadBtn').addEventListener('click', uploadFile);
+document.getElementById('textUploadBtn').addEventListener('click', uploadText);
+
+const savedApprover = localStorage.getItem('approverName');
+if (savedApprover) document.getElementById('approver').value = savedApprover;
+
+loadQueue();
+loadSettings();
+</script>
+</body>
+</html>

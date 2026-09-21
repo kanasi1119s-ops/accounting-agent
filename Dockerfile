@@ -12,6 +12,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
+COPY public ./public
 
 EXPOSE 3000
 CMD ["sh", "-c", "node dist/db/migrate.js && node dist/server.js"]
