@@ -12,4 +12,10 @@ if (!connectionString) {
   throw new Error('DATABASE_URL が設定されていません。.env を確認してください。');
 }
 
-export const pool = new Pool({ connectionString });
+// Render/Fly等のマネージドPostgresはSSL接続を要求する。ローカル開発用クラスタ（localhost）はSSL不要。
+const requiresSsl = !/localhost|127\.0\.0\.1/.test(connectionString);
+
+export const pool = new Pool({
+  connectionString,
+  ssl: requiresSsl ? { rejectUnauthorized: false } : undefined,
+});
