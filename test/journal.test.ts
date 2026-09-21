@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { businessTotal, computeByCounterparty, computeProfitLoss, toJournalEntry } from '../src/accounting/journal.js';
+import {
+  businessTotal,
+  computeBalanceSheet,
+  computeByCounterparty,
+  computeProfitLoss,
+  toJournalEntry,
+} from '../src/accounting/journal.js';
 import type { LedgerSourceInvoice } from '../src/accounting/journal.js';
+import { defaultBusinessProfile } from '../src/types/businessProfile.js';
 
 const sample: LedgerSourceInvoice[] = [
   {
@@ -103,5 +110,50 @@ describe('computeByCounterparty', () => {
   it('sums amounts per vendor for the given direction', () => {
     const rows = computeByCounterparty(sample, 'expense');
     expect(rows).toEqual([{ name: '文具店', amount: 3300, count: 1 }]);
+  });
+});
+
+describe('computeBalanceSheet', () => {
+  it('keeps the balance sheet balanced when a journal entry touches an equity-kind account (e.g. 元入金 capital contribution)', () => {
+    const profile = defaultBusinessProfile(2026);
+    profile.openingBalances.現金 = 100_000;
+    profile.openingBalances.元入金 = 100_000;
+
+    const contribution: LedgerSourceInvoice = {
+      id: 'capital',
+      direction: 'income',
+      issueDate: '2026-05-01',
+      category: '元入金',
+      amountInclTax: 50_000,
+      vendorName: null,
+      paymentMethod: '現金',
+      description: '事業主からの追加出資',
+      businessRatio: null,
+      taxRate: null,
+      taxClass: 'outofscope',
+      invoiceRegistrationNumber: null,
+    };
+
+    const pl = computeProfitLoss([contribution], profile);
+    const bs = computeBalanceSheet([contribution], profile, pl);
+
+    expect(bs.assetsClosing['現金']).toBe(150_000);
+    // 資産側だけ増えて資本側（元入金）が動かないと貸借が一致しなくなる
+    expect(bs.equityClosing['元入金']).toBe(150_000);
+    expect(bs.balanced).toBe(true);
+  });
+
+  it('reduces the 固定資産 closing balance by depreciationExpense so depreciation keeps the sheet balanced', () => {
+    const profile = defaultBusinessProfile(2026);
+    profile.openingBalances.固定資産 = 300_000;
+
+    const pl = computeProfitLoss([], profile);
+    // 固定資産台帳の減価償却は請求書の仕訳を経由しないため、depreciationExpense を
+    // 渡さないと固定資産の残高が動かず、所得だけ減って貸借が一致しなくなる。
+    const withoutDepreciation = computeBalanceSheet([], profile, pl);
+    expect(withoutDepreciation.assetsClosing['固定資産']).toBe(300_000);
+
+    const withDepreciation = computeBalanceSheet([], profile, pl, 75_000);
+    expect(withDepreciation.assetsClosing['固定資産']).toBe(225_000);
   });
 });

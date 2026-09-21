@@ -72,4 +72,20 @@ describe('buildConsumptionTaxReturn', () => {
     // 不課税の給料賃金は仕入税額控除の対象にならないため、控除税額は0のまま
     expect(result.inputTax).toBe(0);
   });
+
+  it('does not silently drop taxable transactions whose taxRate is exactly 0', () => {
+    const profile = defaultBusinessProfile(2026);
+    profile.consumptionTax.isTaxable = true;
+    profile.consumptionTax.method = 'principle';
+
+    const invoices: LedgerSourceInvoice[] = [
+      inv({ id: 'sale', direction: 'income', category: '売上高', amountInclTax: 1_100_000, taxRate: 0 }),
+      inv({ id: 'purchase', direction: 'expense', category: '仕入高', amountInclTax: 550_000, taxRate: 0 }),
+    ];
+    const result = buildConsumptionTaxReturn(invoices, profile);
+    // taxRate===0 の取引も課税売上高・課税仕入高の集計から消えてはならない
+    expect(result.taxableSalesGross).toBe(1_100_000);
+    expect(result.outputTax).toBeGreaterThan(0);
+    expect(result.inputTax).toBeGreaterThan(0);
+  });
 });

@@ -209,10 +209,7 @@ async function loadAll() {
   document.getElementById('journalCsv').href = `/api/reports/journal-csv?year=${year}`;
   document.getElementById('ledgerCsv').href = `/api/reports/general-ledger-csv?year=${year}`;
   document.getElementById('taxClassCsv').href = `/api/reports/tax-class-csv?year=${year}`;
-  await loadPL(year);
-  await loadBS(year);
-  await loadCT(year);
-  await loadIT(year);
+  await Promise.all([loadPL(year), loadBS(year), loadCT(year), loadIT(year)]);
 }
 
 document.getElementById('year').value = new Date().getFullYear();

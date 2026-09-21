@@ -194,11 +194,19 @@ export interface BalanceSheet {
 /**
  * 貸借対照表を計算する。期首残高はBusinessProfile.openingBalancesから、
  * 期中の増減は承認済み仕訳（buildJournal）から積み上げる。
+ * computeProfitLoss と異なり profile は必須（省略不可）：期首残高がないと
+ * 資産・負債の起点が定まらず貸借対照表そのものが作れないため。
+ *
+ * depreciationExpense（当年分の減価償却費、事業割合適用後）を渡した場合、固定資産の
+ * 期末残高からその分を差し引く。固定資産台帳の減価償却は請求書の仕訳を経由しないため、
+ * これを渡さないと pl.incomeBeforeDeduction だけ償却費分減って資産側が動かず貸借が
+ * 一致しなくなる。
  */
 export function computeBalanceSheet(
   invoices: LedgerSourceInvoice[],
   profile: BusinessProfile,
-  pl: ProfitLoss
+  pl: ProfitLoss,
+  depreciationExpense = 0
 ): BalanceSheet {
   const ob = profile.openingBalances;
 
@@ -214,11 +222,15 @@ export function computeBalanceSheet(
 
   const entries = buildJournal(invoices);
   const delta: Record<string, number> = {};
+  let equityDelta = 0;
   for (const e of entries) {
     for (const l of e.lines) {
       const kind = accountKind(l.account);
       if (kind === 'asset') delta[l.account] = (delta[l.account] || 0) + l.debit - l.credit;
-      if (kind === 'liability') delta[l.account] = (delta[l.account] || 0) + l.credit - l.debit;
+      else if (kind === 'liability') delta[l.account] = (delta[l.account] || 0) + l.credit - l.debit;
+      // 元入金など資本科目を相手科目にした仕訳（例：事業主からの出資・払戻を直接記録した場合）も
+      // 貸借対照表の期末残高に反映しないと、資産側だけ動いて貸借が一致しなくなる。
+      else if (kind === 'equity') equityDelta += l.credit - l.debit;
     }
   }
 
@@ -244,17 +256,18 @@ export function computeBalanceSheet(
   }
 
   assetsClosing['棚卸資産'] = pl.closingInventory;
+  assetsClosing['固定資産'] = Math.max(0, (assetsClosing['固定資産'] || 0) - Math.max(0, depreciationExpense));
 
   const totalAssetsClosing = Object.values(assetsClosing).reduce((a, b) => a + b, 0);
   const totalLiabilitiesClosing = Object.values(liabilitiesClosing).reduce((a, b) => a + b, 0);
 
   const equityOpening = { 元入金: capital };
   const equityClosing = {
-    元入金: capital,
+    元入金: capital + equityDelta,
     青色申告特別控除前の所得金額: pl.incomeBeforeDeduction,
   };
 
-  const rightClosing = totalLiabilitiesClosing + capital + pl.incomeBeforeDeduction;
+  const rightClosing = totalLiabilitiesClosing + capital + equityDelta + pl.incomeBeforeDeduction;
   const difference = Math.round(totalAssetsClosing - rightClosing);
 
   return {

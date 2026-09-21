@@ -48,6 +48,7 @@ export interface FixedAssetInput {
   method: 'straight' | 'declining';
   businessRatio: number; // 0〜1
   priorAccumulatedDepreciation: number;
+  disposedAt?: string | null; // YYYY-MM-DD（除却・売却日。null/未指定なら継続保有）
 }
 
 export interface DepreciationResult {
@@ -62,7 +63,14 @@ const MEMORANDUM_VALUE = 1; // 備忘価額
 
 /**
  * 指定した会計年度（fiscalYear、1〜12月の暦年）分の減価償却費を計算する。
- * 取得年の年度は、事業供用開始日から年度末までの月数で月割りする。
+ * 取得年の年度は、事業供用開始日から年度末までの月数で月割りする。除却年度は
+ * 除却日を含む月までで月割りする。
+ *
+ * 定率法は、通常償却額が保証額を下回った年度以降、その切替年度の未償却残高×改定償却率を
+ * 毎年据え置く必要がある（切替後に残高で再計算すると年々減少してしまい税法上誤りになる）。
+ * この関数は priorAccumulatedDepreciation が「このソフトで管理する前の時点の累積償却額」で
+ * あり年度ごとに自動繰越されないことを踏まえ、取得年度から対象年度まで1年ずつシミュレーションして
+ * 切替タイミングと据置額を都度re-deriveする。
  */
 export function calculateDepreciationForYear(asset: FixedAssetInput, fiscalYear: number): DepreciationResult {
   const rate = getDepreciationRate(asset.usefulLife);
@@ -80,35 +88,58 @@ export function calculateDepreciationForYear(asset: FixedAssetInput, fiscalYear:
   if (acquisitionYear > fiscalYear) return zero;
   if (zero.isFullyDepreciated) return zero;
 
-  const remainingBeforeThisYear = asset.acquisitionCost - MEMORANDUM_VALUE - asset.priorAccumulatedDepreciation;
-  if (remainingBeforeThisYear <= 0) return zero;
+  const disposalDate = asset.disposedAt ? new Date(asset.disposedAt) : null;
+  const disposalYear = disposalDate ? disposalDate.getFullYear() : null;
+  if (disposalYear !== null && disposalYear < fiscalYear) return zero;
 
-  const monthsInService = acquisitionYear === fiscalYear ? 12 - acquisitionDate.getMonth() : 12;
+  let accumulated = asset.priorAccumulatedDepreciation;
+  let frozenAmount: number | null = null; // 定率法：改定償却率切替後の据置年額（12ヶ月換算）
+  let annualDepreciation = 0;
 
-  let rawAnnual: number;
-  if (asset.method === 'straight') {
-    rawAnnual = Math.round((asset.acquisitionCost * rate.straightLineRate * monthsInService) / 12);
-  } else {
-    const bookValueAtYearStart = asset.acquisitionCost - asset.priorAccumulatedDepreciation;
-    const guaranteeAmount = rate.guaranteeRate ? asset.acquisitionCost * rate.guaranteeRate : 0;
-    const normalAmount = Math.round((bookValueAtYearStart * rate.decliningBalanceRate * monthsInService) / 12);
-
-    if (rate.guaranteeRate && normalAmount < guaranteeAmount && rate.revisedRate) {
-      rawAnnual = Math.round(bookValueAtYearStart * rate.revisedRate);
-    } else {
-      rawAnnual = normalAmount;
+  for (let y = acquisitionYear; y <= fiscalYear; y++) {
+    const remaining = asset.acquisitionCost - MEMORANDUM_VALUE - accumulated;
+    if (remaining <= 0) {
+      annualDepreciation = 0;
+      break;
     }
+
+    const startMonth = y === acquisitionYear ? acquisitionDate.getMonth() : 0;
+    const endMonthExclusive = disposalYear === y ? (disposalDate as Date).getMonth() + 1 : 12;
+    const monthsInService = Math.max(0, endMonthExclusive - startMonth);
+
+    let rawAnnual: number;
+    if (monthsInService === 0) {
+      rawAnnual = 0;
+    } else if (asset.method === 'straight') {
+      rawAnnual = Math.round((asset.acquisitionCost * rate.straightLineRate * monthsInService) / 12);
+    } else if (frozenAmount !== null) {
+      rawAnnual = monthsInService < 12 ? Math.round((frozenAmount * monthsInService) / 12) : frozenAmount;
+    } else {
+      const bookValueAtYearStart = asset.acquisitionCost - accumulated;
+      const guaranteeAmount = rate.guaranteeRate ? asset.acquisitionCost * rate.guaranteeRate : 0;
+      const normalAmount = Math.round((bookValueAtYearStart * rate.decliningBalanceRate * monthsInService) / 12);
+
+      if (rate.guaranteeRate && normalAmount < guaranteeAmount && rate.revisedRate) {
+        frozenAmount = Math.round(bookValueAtYearStart * rate.revisedRate);
+        rawAnnual = monthsInService < 12 ? Math.round((frozenAmount * monthsInService) / 12) : frozenAmount;
+      } else {
+        rawAnnual = normalAmount;
+      }
+    }
+
+    annualDepreciation = Math.min(rawAnnual, remaining);
+    accumulated += annualDepreciation;
+
+    if (disposalYear === y) break;
   }
 
-  const annualDepreciation = Math.min(rawAnnual, remainingBeforeThisYear);
   const businessPortionDepreciation = Math.round(annualDepreciation * asset.businessRatio);
-  const accumulatedDepreciation = asset.priorAccumulatedDepreciation + annualDepreciation;
 
   return {
     annualDepreciation,
     businessPortionDepreciation,
-    accumulatedDepreciation,
-    bookValueAtYearEnd: asset.acquisitionCost - accumulatedDepreciation,
-    isFullyDepreciated: accumulatedDepreciation >= asset.acquisitionCost - MEMORANDUM_VALUE,
+    accumulatedDepreciation: accumulated,
+    bookValueAtYearEnd: asset.acquisitionCost - accumulated,
+    isFullyDepreciated: accumulated >= asset.acquisitionCost - MEMORANDUM_VALUE,
   };
 }

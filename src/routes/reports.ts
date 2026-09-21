@@ -10,11 +10,13 @@ import {
   computeMonthly,
   computeProfitLoss,
   type LedgerSourceInvoice,
+  type ProfitLoss,
 } from '../accounting/journal.js';
 import { calculateDepreciationForYear } from '../accounting/depreciation.js';
 import { buildConsumptionTaxReturn } from '../tax/consumptionTax.js';
 import { buildIncomeTaxReturn } from '../tax/incomeTax.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import type { BusinessProfile } from '../types/businessProfile.js';
 
 export function reportsRouter(): Router {
   const router = Router();
@@ -44,7 +46,8 @@ export function reportsRouter(): Router {
     res.json({ success: true, data: computeByCounterparty(sourceInvoices, direction) });
   }));
 
-  // 貸借対照表（期首残高はその年のBusinessProfileから）
+  // 貸借対照表（期首残高はその年のBusinessProfileから）。所得税試算と同じ損益
+  // （減価償却費を反映済み）を使わないと、両画面で所得金額が食い違ってしまう。
   router.get('/balance-sheet', asyncHandler(async (req, res) => {
     const year = requireYear(req.query);
     if (!year) return res.status(400).json({ success: false, error: 'year (YYYY) が必要です。' });
@@ -52,8 +55,11 @@ export function reportsRouter(): Router {
     const { from, to } = fiscalRange(year);
     const sourceInvoices = await loadLedgerSource(from, to);
     const profile = await getBusinessProfile(year);
-    const pl = computeProfitLoss(sourceInvoices, profile);
-    res.json({ success: true, data: { balanceSheet: computeBalanceSheet(sourceInvoices, profile, pl), profitLoss: pl } });
+    const { pl, depreciation } = await computeYearlyProfitLoss(sourceInvoices, profile, year);
+    res.json({
+      success: true,
+      data: { balanceSheet: computeBalanceSheet(sourceInvoices, profile, pl, depreciation), profitLoss: pl },
+    });
   }));
 
   // 消費税申告書試算
@@ -75,18 +81,7 @@ export function reportsRouter(): Router {
     const { from, to } = fiscalRange(year);
     const sourceInvoices = await loadLedgerSource(from, to);
     const profile = await getBusinessProfile(year);
-    const depreciation = await computeDepreciationExpense(year);
-
-    const pl = computeProfitLoss(sourceInvoices, profile);
-    if (depreciation > 0) {
-      pl.expenseByAccount['減価償却費'] = (pl.expenseByAccount['減価償却費'] || 0) + depreciation;
-      pl.totalExpense += depreciation;
-      pl.incomeBeforeDeduction = Math.round(pl.incomeBeforeDeduction - depreciation);
-      const blueDeduction =
-        profile.filingType === 'blue' ? Math.min(Math.max(0, pl.incomeBeforeDeduction), profile.blueDeduction) : 0;
-      pl.blueDeduction = blueDeduction;
-      pl.netIncome = Math.max(0, pl.incomeBeforeDeduction - blueDeduction);
-    }
+    const { pl, depreciation } = await computeYearlyProfitLoss(sourceInvoices, profile, year);
 
     res.json({ success: true, data: { incomeTax: buildIncomeTaxReturn(pl, profile), profitLoss: pl, depreciation } });
   }));
@@ -184,9 +179,30 @@ export function reportsRouter(): Router {
 
 async function computeDepreciationExpense(year: number): Promise<number> {
   const assets = await listFixedAssets();
-  return assets
-    .filter((a) => !a.disposedAt || Number(a.disposedAt.slice(0, 4)) >= year)
-    .reduce((sum, a) => sum + calculateDepreciationForYear(a, year).businessPortionDepreciation, 0);
+  return assets.reduce((sum, a) => sum + calculateDepreciationForYear(a, year).businessPortionDepreciation, 0);
+}
+
+/**
+ * 減価償却費を反映した損益を計算する。貸借対照表・所得税試算のどちらも必ずこれを
+ * 経由することで、両画面の所得金額（＝当期の元入金増減）が食い違わないようにする。
+ */
+async function computeYearlyProfitLoss(
+  sourceInvoices: LedgerSourceInvoice[],
+  profile: BusinessProfile,
+  year: number
+): Promise<{ pl: ProfitLoss; depreciation: number }> {
+  const depreciation = await computeDepreciationExpense(year);
+  const pl = computeProfitLoss(sourceInvoices, profile);
+  if (depreciation > 0) {
+    pl.expenseByAccount['減価償却費'] = (pl.expenseByAccount['減価償却費'] || 0) + depreciation;
+    pl.totalExpense += depreciation;
+    pl.incomeBeforeDeduction = Math.round(pl.incomeBeforeDeduction - depreciation);
+    const blueDeduction =
+      profile.filingType === 'blue' ? Math.min(Math.max(0, pl.incomeBeforeDeduction), profile.blueDeduction) : 0;
+    pl.blueDeduction = blueDeduction;
+    pl.netIncome = Math.max(0, pl.incomeBeforeDeduction - blueDeduction);
+  }
+  return { pl, depreciation };
 }
 
 async function loadLedgerSource(from: string, to: string): Promise<LedgerSourceInvoice[]> {

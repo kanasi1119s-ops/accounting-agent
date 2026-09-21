@@ -68,8 +68,10 @@ export function buildConsumptionTaxReturn(
   const plInvoices = invoices.filter((inv) => !isBalanceSheetCategory(inv.category));
 
   const sales = plInvoices.filter((t) => t.direction === 'income' && t.taxClass !== 'outofscope');
+  // taxRate は「未設定(null)なら10%扱い」のみを想定しており、0や負値等の異常値を
+  // 8%/10%どちらの区分にも入れず集計から丸ごと消してしまわないよう、10%未満をすべて8%側に含める。
   const sales10 = sales.filter((t) => (t.taxRate ?? 0.1) >= 0.095);
-  const sales8 = sales.filter((t) => (t.taxRate ?? 0.1) > 0 && (t.taxRate ?? 0.1) < 0.095);
+  const sales8 = sales.filter((t) => (t.taxRate ?? 0.1) < 0.095);
 
   const gross10 = sales10.reduce((a, t) => a + businessTotal(t), 0);
   const gross8 = sales8.reduce((a, t) => a + businessTotal(t), 0);
@@ -99,9 +101,7 @@ export function buildConsumptionTaxReturn(
       (t) => t.direction === 'expense' && t.taxClass !== 'outofscope' && t.taxClass !== 'nontaxable'
     );
     const p10 = purchases.filter((t) => (t.taxRate ?? 0.1) >= 0.095).reduce((a, t) => a + businessTotal(t), 0);
-    const p8 = purchases
-      .filter((t) => (t.taxRate ?? 0.1) > 0 && (t.taxRate ?? 0.1) < 0.095)
-      .reduce((a, t) => a + businessTotal(t), 0);
+    const p8 = purchases.filter((t) => (t.taxRate ?? 0.1) < 0.095).reduce((a, t) => a + businessTotal(t), 0);
     inputTax = Math.floor(p10 * NATIONAL_RATE_10 + p8 * NATIONAL_RATE_8);
     notes.push('本則課税：全額控除（課税売上割合95%以上）を前提に計算しています。');
     const noInvoice = purchases.filter((t) => !t.invoiceRegistrationNumber).length;

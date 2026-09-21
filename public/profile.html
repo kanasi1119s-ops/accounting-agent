@@ -49,6 +49,7 @@
       <div class="field"><label>郵便番号</label><input id="postalCode" /></div>
       <div class="field"><label>電話番号</label><input id="phone" /></div>
       <div class="field" style="grid-column:1/-1;"><label>納税地（住所）</label><input id="address" /></div>
+      <div class="field" style="grid-column:1/-1;"><label>その年の1月1日現在の住所（納税地と異なる場合のみ）</label><input id="addressJan1" /></div>
       <div class="field" style="grid-column:1/-1;"><label>事業の内容</label><input id="businessDescription" /></div>
       <div class="field"><label>提出先税務署</label><input id="taxOffice" /></div>
       <div class="field"><label>開業日</label><input type="date" id="startDate" /></div>
@@ -182,6 +183,7 @@ async function load() {
   document.getElementById('postalCode').value = p.postalCode || '';
   document.getElementById('phone').value = p.phone || '';
   document.getElementById('address').value = p.address || '';
+  document.getElementById('addressJan1').value = p.addressJan1 || '';
   document.getElementById('businessDescription').value = p.businessDescription || '';
   document.getElementById('taxOffice').value = p.taxOffice || '';
   document.getElementById('startDate').value = p.startDate || '';
@@ -242,7 +244,7 @@ async function save() {
   const profile = {
     fiscalYear: year,
     name: str('name'), nameKana: str('nameKana'), tradeName: str('tradeName'),
-    postalCode: str('postalCode'), address: str('address'), phone: str('phone'),
+    postalCode: str('postalCode'), address: str('address'), addressJan1: str('addressJan1'), phone: str('phone'),
     occupation: str('occupation'), businessDescription: str('businessDescription'),
     taxOffice: str('taxOffice'), startDate: str('startDate'), invoiceRegNumber: str('invoiceRegNumber'),
     filingType: document.getElementById('filingType').value,

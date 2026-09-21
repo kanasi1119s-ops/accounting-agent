@@ -82,4 +82,41 @@ describe('calculateDepreciationForYear', () => {
     );
     expect(result.annualDepreciation).toBe(0);
   });
+
+  it('freezes the declining-balance amount at the switch-year value instead of recomputing from a shrinking book value', () => {
+    const asset = {
+      acquisitionCost: 10_000_000,
+      acquisitionDate: '2020-01-01',
+      usefulLife: 10,
+      method: 'declining' as const,
+      businessRatio: 1,
+      priorAccumulatedDepreciation: 0,
+    };
+    // 耐用年数10年の定率法：2026年度（取得7年目）に保証率を下回り改定償却率へ切替わる
+    const switchYear = calculateDepreciationForYear(asset, 2026);
+    const yearAfter = calculateDepreciationForYear(asset, 2027);
+    const twoYearsAfter = calculateDepreciationForYear(asset, 2028);
+    expect(switchYear.annualDepreciation).toBe(655_360);
+    // 切替後は毎年同じ額で据え置かれる（帳簿価額で再計算すると年々減少してしまい税法上誤りになる）
+    expect(yearAfter.annualDepreciation).toBe(655_360);
+    expect(twoYearsAfter.annualDepreciation).toBe(655_360);
+  });
+
+  it('prorates the disposal-year depreciation by month and stops depreciating afterward', () => {
+    const asset = {
+      acquisitionCost: 400_000,
+      acquisitionDate: '2024-01-01',
+      usefulLife: 4,
+      method: 'straight' as const,
+      businessRatio: 1,
+      priorAccumulatedDepreciation: 0,
+      disposedAt: '2026-06-15',
+    };
+    const disposalYear = calculateDepreciationForYear(asset, 2026);
+    // 年100,000円のうち1月〜6月（6ヶ月）分のみ計上
+    expect(disposalYear.annualDepreciation).toBe(50_000);
+
+    const afterDisposal = calculateDepreciationForYear(asset, 2027);
+    expect(afterDisposal.annualDepreciation).toBe(0);
+  });
 });
