@@ -50,7 +50,11 @@ export interface MultiPageTotalCheck {
   notes: string[];
 }
 
-const SUBTOTAL_PATTERN = /(?:小計|合計|ページ計)[:\s]*[¥￥]?\s*([0-9,]+)/;
+// 「合計」は書類全体の総合計（reportedGrandTotal）と同じ語で紛らわしいため、
+// ページ単位の小計を表す語だけにマッチさせる。「合計」も含めてしまうと、
+// 小計と総合計の両方が載っているページ（典型的には最終ページ）で、
+// どちらが先にマッチするかによって誤った金額をそのページの小計として拾ってしまう。
+const SUBTOTAL_PATTERN = /(?:小計|ページ計)[:\s]*[¥￥]?\s*([0-9,]+)/;
 
 export function checkMultiPageTotal(pageTexts: string[], reportedGrandTotal: number | null): MultiPageTotalCheck {
   if (pageTexts.length <= 1) {

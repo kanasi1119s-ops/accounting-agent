@@ -133,16 +133,71 @@ export async function listApprovedInvoicesInRange(fromDate: string, toDate: stri
   return rows;
 }
 
+/**
+ * PATCH /api/invoices/:id (手動修正) から書き込みを許可するフィールドのみを列挙する。
+ * 列名はここで固定した文字列のみを使い、クライアントから渡されたキーをSQLに埋め込むことは絶対にしない
+ * （さもないと任意カラム名・任意SQLが実行できてしまう）。
+ *
+ * status / 各種 derived・system管理フィールド（tax_consistency_status, category_confidence,
+ * allocation_required, extraction_method, ocr_raw_json, dedup_hash 等）や fx関連は意図的に除外している。
+ * status は /api/approvals/:id/decide、為替情報は /api/invoices/:id/fx という専用エンドポイントを
+ * 必ず経由させ、承認フロー・監査ログ・取引先学習などの副作用を伴わずに書き換えられないようにする。
+ */
+const PATCHABLE_INVOICE_COLUMNS: Record<string, string> = {
+  vendorNameRaw: 'vendor_name_raw',
+  documentType: 'document_type',
+  issueDate: 'issue_date',
+  amountExclTax: 'amount_excl_tax',
+  taxAmount: 'tax_amount',
+  amountInclTax: 'amount_incl_tax',
+  taxRate: 'tax_rate',
+  currency: 'currency',
+  invoiceRegistrationNumber: 'invoice_registration_number',
+  category: 'category',
+  businessRatio: 'business_ratio',
+  description: 'description',
+  paymentMethod: 'payment_method',
+};
+
+/** /api/invoices/:id/fx 専用。fx関連3カラムは汎用PATCHの許可リストに含めず、ここだけで書き込む。 */
+export async function updateInvoiceFx(
+  id: string,
+  fx: { fxRate: number; fxRateDate: string; fxMethod: 'ttm' | 'tts' | 'ttb' }
+): Promise<void> {
+  await pool.query(
+    `UPDATE invoices SET fx_rate = $2, fx_rate_date = $3, fx_method = $4, updated_at = now() WHERE id = $1`,
+    [id, fx.fxRate, fx.fxRateDate, fx.fxMethod]
+  );
+}
+
+export const PATCHABLE_INVOICE_FIELDS = Object.keys(PATCHABLE_INVOICE_COLUMNS);
+
+/**
+ * status は汎用PATCH(updateInvoiceFields)の許可リストに意図的に含めていない。
+ * 承認フロー(/api/approvals/:id/decide)からのみ、ここを経由して status を書き換える。
+ */
+export async function updateInvoiceStatus(
+  id: string,
+  status: 'approved' | 'rejected',
+  category?: string | null
+): Promise<void> {
+  if (category !== undefined) {
+    await pool.query(`UPDATE invoices SET status = $2, category = $3, updated_at = now() WHERE id = $1`, [
+      id,
+      status,
+      category,
+    ]);
+  } else {
+    await pool.query(`UPDATE invoices SET status = $2, updated_at = now() WHERE id = $1`, [id, status]);
+  }
+}
+
 export async function updateInvoiceFields(id: string, fields: Record<string, unknown>): Promise<void> {
-  const keys = Object.keys(fields);
+  const keys = Object.keys(fields).filter((k) => k in PATCHABLE_INVOICE_COLUMNS);
   if (keys.length === 0) return;
-  const setClauses = keys.map((k, i) => `${toSnakeCase(k)} = $${i + 2}`).join(', ');
+  const setClauses = keys.map((k, i) => `${PATCHABLE_INVOICE_COLUMNS[k]} = $${i + 2}`).join(', ');
   await pool.query(`UPDATE invoices SET ${setClauses}, updated_at = now() WHERE id = $1`, [
     id,
     ...keys.map((k) => fields[k]),
   ]);
-}
-
-function toSnakeCase(camel: string): string {
-  return camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }

@@ -210,6 +210,10 @@ async function finalizeExtracted(params: {
 }): Promise<IngestResult> {
   const { direction, parsed, notes } = params;
 
+  if (!parsed.date) {
+    notes.push('発行日を読み取れませんでした。今日の日付で埋めず未設定のままにしています。承認前に手動で入力してください。');
+  }
+
   // 1. 取引先解決（経費側は支払先、収益側は請求先。どちらも vendors マスタで一元管理する）
   const vendorName = parsed.merchant.trim();
   const vendor = vendorName ? await findOrCreateVendorByName(vendorName) : null;
@@ -242,9 +246,10 @@ async function finalizeExtracted(params: {
 
   // 4. 重複請求書検知（発行日+取引先+金額のハッシュ）
   const dedupHash = computeDedupHash({
-    issueDate: parsed.date,
+    issueDate: parsed.date || null,
     vendorName: vendorName || null,
     amountInclTax: parsed.total,
+    direction,
   });
   const duplicate = dedupHash ? await findByDedupHash(dedupHash) : null;
   if (duplicate) {
@@ -328,7 +333,9 @@ async function finalizeExtracted(params: {
   const reasons: string[] = ['phase1_all_pending'];
   if (parsed.total >= amountThreshold) reasons.push('amount_threshold');
   if ((suggestion.confidence || 0) < confidenceThreshold) reasons.push('low_confidence');
-  if (direction === 'expense' && invoiceNumberCheck.normalized && !invoiceNumberCheck.isValidFormat) {
+  // 番号が「形式不正」なだけでなく「そもそも記載がない／登録状況が不明」なケースも
+  // 同じ理由タグで拾う。判定はここで再計算せず、共通リゾルバの結果(registrationStatus)を信頼する。
+  if (direction === 'expense' && (registrationStatus === 'unregistered' || registrationStatus === 'unknown')) {
     reasons.push('invoice_requirement');
   }
   if (params.multiPageMismatch) reasons.push('multi_page_mismatch');
@@ -336,6 +343,7 @@ async function finalizeExtracted(params: {
   if (taxCheck.status === 'mismatch') reasons.push('tax_mismatch');
   if (isForeignCurrency) reasons.push('foreign_currency');
   if (allocationRequired) reasons.push('allocation_required');
+  if (!parsed.date) reasons.push('missing_issue_date');
 
   await enqueueForApproval(invoiceId, reasons);
   await recordAuditLog({

@@ -61,7 +61,7 @@ const EDITABLE_FIELDS = [
   ['taxRate', '税率 (0.1 / 0.08)', 'number'],
   ['invoiceRegistrationNumber', 'インボイス登録番号', 'text'],
   ['category', '勘定科目', 'text'],
-  ['businessRatio', '事業按分比率 (0-1、空欄=按分なし100%)', 'number'],
+  ['businessRatio', '事業按分比率 (%、空欄=按分なし100%)', 'percent'],
   ['paymentMethod', '支払方法', 'text'],
   ['description', '摘要', 'text'],
 ];
@@ -108,8 +108,14 @@ async function load() {
   for (const [key, label, type] of EDITABLE_FIELDS) {
     const div = document.createElement('div');
     div.className = 'field';
-    const value = camel[key] ?? '';
-    div.innerHTML = `<label>${label}</label><input data-field="${key}" type="${type}" value="${value}" ${type==='number' ? 'step=any' : ''} />`;
+    const isPercent = type === 'percent';
+    const raw = camel[key];
+    const value = isPercent
+      ? (raw === null || raw === undefined || raw === '' ? '' : Math.round(Number(raw) * 100))
+      : (raw ?? '');
+    const inputType = isPercent ? 'number' : type;
+    const extraAttrs = isPercent ? 'min="0" max="100" step="1"' : (type === 'number' ? 'step=any' : '');
+    div.innerHTML = `<label>${label}</label><input data-field="${key}" data-type="${type}" type="${inputType}" value="${value}" ${extraAttrs} />`;
     container.appendChild(div);
   }
 
@@ -151,6 +157,13 @@ async function save() {
   const fields = {};
   document.querySelectorAll('#fields input[data-field]').forEach((input) => {
     const val = input.value.trim();
+    const fieldType = input.dataset.type;
+    if (fieldType === 'percent') {
+      // 空欄は「未設定に戻す（按分なし100%）」という明確な意味を持つので、
+      // 他の項目と違って省略せず null を明示的に送る。
+      fields[input.dataset.field] = val === '' ? null : Math.min(100, Math.max(0, Number(val))) / 100;
+      return;
+    }
     if (val === '') return;
     fields[input.dataset.field] = input.type === 'number' ? Number(val) : val;
   });

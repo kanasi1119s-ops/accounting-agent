@@ -2,13 +2,23 @@ import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { ingestInvoice } from '../pipeline/ingestInvoice.js';
-import { findInvoiceById, updateInvoiceFields } from '../repositories/invoiceRepo.js';
+import { findInvoiceById, PATCHABLE_INVOICE_FIELDS, updateInvoiceFields, updateInvoiceFx } from '../repositories/invoiceRepo.js';
 import { recordAuditLog } from '../repositories/auditRepo.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
+import { isUuid } from '../lib/isUuid.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 export function invoicesRouter(uploadDir: string): Router {
   const router = Router();
+
+  // :id を含む全ルートの手前でUUID形式を検証し、無効な形式はDBに投げる前に400で弾く
+  router.param('id', (req, res, next, id) => {
+    if (!isUuid(id)) {
+      return res.status(400).json({ success: false, error: '不正なIDです。' });
+    }
+    next();
+  });
 
   // 画像・PDFのアップロード取込（レシート・請求書・通帳スキャン等）
   router.post('/upload', upload.single('file'), async (req, res) => {
@@ -53,14 +63,14 @@ export function invoicesRouter(uploadDir: string): Router {
     }
   });
 
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', asyncHandler(async (req, res) => {
     const invoice = await findInvoiceById(req.params.id);
     if (!invoice) return res.status(404).json({ success: false, error: '見つかりません。' });
     res.json({ success: true, data: invoice });
-  });
+  }));
 
   // 手動修正（金額・科目の訂正等）。必ず監査ログに変更前後の値を残す。
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', asyncHandler(async (req, res) => {
     const schema = z.object({
       changedBy: z.string().min(1),
       reason: z.string().optional(),
@@ -71,6 +81,14 @@ export function invoicesRouter(uploadDir: string): Router {
       return res.status(400).json({ success: false, error: '入力内容が不正です。', details: parseResult.error.flatten() });
     }
     const { changedBy, reason, fields } = parseResult.data;
+
+    const disallowedKeys = Object.keys(fields).filter((k) => !PATCHABLE_INVOICE_FIELDS.includes(k));
+    if (disallowedKeys.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `このフィールドはこの手動修正エンドポイントからは変更できません: ${disallowedKeys.join(', ')}。status は /api/approvals/:id/decide、為替情報は /api/invoices/:id/fx を使用してください。`,
+      });
+    }
 
     const before = await findInvoiceById(req.params.id);
     if (!before) return res.status(404).json({ success: false, error: '見つかりません。' });
@@ -87,10 +105,10 @@ export function invoicesRouter(uploadDir: string): Router {
 
     const after = await findInvoiceById(req.params.id);
     res.json({ success: true, data: after });
-  });
+  }));
 
   // 外貨建て証憑の為替レート・換算方法の指定
-  router.patch('/:id/fx', async (req, res) => {
+  router.patch('/:id/fx', asyncHandler(async (req, res) => {
     const schema = z.object({
       fxRate: z.number().positive(),
       fxRateDate: z.string(), // YYYY-MM-DD（レート取得日を明記する）
@@ -106,7 +124,7 @@ export function invoicesRouter(uploadDir: string): Router {
     const before = await findInvoiceById(req.params.id);
     if (!before) return res.status(404).json({ success: false, error: '見つかりません。' });
 
-    await updateInvoiceFields(req.params.id, { fxRate, fxRateDate, fxMethod });
+    await updateInvoiceFx(req.params.id, { fxRate, fxRateDate, fxMethod });
     await recordAuditLog({
       invoiceId: req.params.id,
       action: 'update',
@@ -118,7 +136,7 @@ export function invoicesRouter(uploadDir: string): Router {
     });
 
     res.json({ success: true });
-  });
+  }));
 
   return router;
 }

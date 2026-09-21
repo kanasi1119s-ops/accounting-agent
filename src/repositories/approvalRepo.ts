@@ -8,13 +8,15 @@ export async function enqueueForApproval(invoiceId: string, reasons: string[]): 
   return rows[0].id;
 }
 
+// 'needs_info'（要確認にする）は「まだ決着していない」状態なので一覧に残す。
+// ここで 'pending' だけに絞ると、要確認にした証憑が二度と承認キューに現れなくなる。
 export async function listPendingApprovals(): Promise<any[]> {
   const { rows } = await pool.query(
     `SELECT q.*, i.vendor_name_raw, i.category, i.amount_incl_tax, i.direction, i.issue_date, i.status AS invoice_status
      FROM approval_queue q
      JOIN invoices i ON i.id = q.invoice_id
-     WHERE q.status = 'pending'
-     ORDER BY q.created_at ASC`
+     WHERE q.status IN ('pending', 'needs_info')
+     ORDER BY (q.status = 'needs_info') ASC, q.created_at ASC`
   );
   return rows;
 }

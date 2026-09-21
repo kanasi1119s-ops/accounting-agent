@@ -192,13 +192,14 @@ const REASON_LABELS = {
   phase1_all_pending: 'フェーズ1: 全件確認対象',
   amount_threshold: '金額しきい値超過',
   low_confidence: '科目の信頼度が低い',
-  invoice_requirement: 'インボイス番号の形式不正',
+  invoice_requirement: 'インボイス登録番号の要確認',
   multi_page_mismatch: '複数ページ合計不一致',
   duplicate: '重複の疑い',
   tax_mismatch: '税抜税込の不整合',
   foreign_currency: '外貨建て（レート要指定）',
   allocation_required: '家事按分の検討が必要',
   extraction_failed: '自動抽出不可（手動入力待ち）',
+  missing_issue_date: '発行日が未確認',
 };
 
 const SETTINGS_LABELS = {
@@ -248,6 +249,9 @@ function renderCard(row) {
   const amountText = row.amount_incl_tax !== null ? `¥${Number(row.amount_incl_tax).toLocaleString()}` : '(金額未確定)';
   const directionClass = row.direction === 'income' ? 'direction-income' : 'direction-expense';
   const directionLabel = row.direction === 'income' ? '収入' : '支出';
+  const needsInfoBadge = row.status === 'needs_info'
+    ? '<span class="reason-chip" style="background:#fee2e2; color:#991b1b;">要確認中（前回「要確認にする」で保留）</span>'
+    : '';
 
   const reasonsHtml = (row.reasons || [])
     .map((r) => `<span class="reason-chip">${REASON_LABELS[r] || r}</span>`)
@@ -262,7 +266,7 @@ function renderCard(row) {
       </div>
       <div class="amount">${amountText}</div>
     </div>
-    <div class="reasons">${reasonsHtml}</div>
+    <div class="reasons">${needsInfoBadge}${reasonsHtml}</div>
     <div class="meta">
       勘定科目:
       <input type="text" class="category-input" value="${row.category || ''}" placeholder="未確定（手動で入力してください）" style="width:180px;" />

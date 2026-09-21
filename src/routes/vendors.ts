@@ -2,17 +2,26 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { listVendors, updateVendorDefaultBusinessRatio } from '../repositories/vendorRepo.js';
 import { recordAuditLog } from '../repositories/auditRepo.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
+import { isUuid } from '../lib/isUuid.js';
 
 export function vendorsRouter(): Router {
   const router = Router();
 
-  router.get('/', async (_req, res) => {
-    const vendors = await listVendors();
-    res.json({ success: true, data: vendors });
+  router.param('id', (req, res, next, id) => {
+    if (!isUuid(id)) {
+      return res.status(400).json({ success: false, error: '不正なIDです。' });
+    }
+    next();
   });
 
+  router.get('/', asyncHandler(async (_req, res) => {
+    const vendors = await listVendors();
+    res.json({ success: true, data: vendors });
+  }));
+
   // 按分ルール設定画面: 取引先ごとのデフォルト事業按分比率を登録する
-  router.patch('/:id/default-business-ratio', async (req, res) => {
+  router.patch('/:id/default-business-ratio', asyncHandler(async (req, res) => {
     const schema = z.object({
       ratio: z.number().min(0).max(1).nullable(),
       changedBy: z.string().min(1),
@@ -34,7 +43,7 @@ export function vendorsRouter(): Router {
     });
 
     res.json({ success: true });
-  });
+  }));
 
   return router;
 }

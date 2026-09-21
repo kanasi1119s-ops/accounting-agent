@@ -38,10 +38,14 @@ export function suggestFromVendorHistory(
  * 「ソロAI帳簿」の server.ts の OCRプロンプトが使っていた経費科目候補リストをベースに、
  * 整体院のような役務提供業でも使う頻度の高いキーワードを補っている。
  */
+// より限定的なキーワード（例: 「駐車場代」）を、それを部分文字列として含むより広いキーワード
+// （例: 「駐車場」）より前に置くこと。先勝ちマッチなので、順序が逆だと後者のルールが
+// 永久にマッチしなくなる（駐車場代の請求が常に旅費交通費に分類されてしまう）。
 const KEYWORD_RULES: { pattern: RegExp; category: string }[] = [
   { pattern: /電気|ガス|水道|光熱/, category: '水道光熱費' },
   { pattern: /携帯|スマホ|プロバイダ|インターネット|通信|電話料金/, category: '通信費' },
   { pattern: /家賃|賃料|テナント料/, category: '地代家賃' },
+  { pattern: /車検|洗車|駐車場代|カー用品/, category: '車両費' },
   { pattern: /タクシー|電車|バス|新幹線|駐車場|ガソリン|高速道路/, category: '旅費交通費' },
   { pattern: /広告|チラシ|ホームページ|web制作|Web広告|SNS広告/i, category: '広告宣伝費' },
   { pattern: /接待|懇親会|贈答|手土産/, category: '接待交際費' },
@@ -49,7 +53,6 @@ const KEYWORD_RULES: { pattern: RegExp; category: string }[] = [
   { pattern: /修理|修繕|メンテナンス/, category: '修繕費' },
   { pattern: /文房具|事務用品|消耗品|備品|タオル|施術用品/, category: '消耗品費' },
   { pattern: /振込手数料|手数料|ATM/, category: '支払手数料' },
-  { pattern: /車検|洗車|駐車場代|カー用品/, category: '車両費' },
   { pattern: /研修|セミナー|講習会/, category: '研修費' },
   { pattern: /書籍|新聞|雑誌|購読料/, category: '新聞図書費' },
   { pattern: /外注|業務委託費|委託料/, category: '外注工賃' },

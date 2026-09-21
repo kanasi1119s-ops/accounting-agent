@@ -165,31 +165,40 @@ export async function runReceiptOcr(params: {
 
 /**
  * モデルの生出力を安全な値に丸める。
- * amount（税抜）は total - tax と ±1円以内で一致するときだけ採用し、
- * ずれていれば自分たちで計算し直す（「ソロAI帳簿」の reconciledAmount ロジックを移植）。
+ *
+ * 重要: total/tax/amountがモデルから読み取れている場合は、その値をそのまま採用する
+ * （互いに矛盾していても、ここで勝手に辻褄を合わせない）。矛盾の検出は
+ * src/lib/taxConsistency.ts の checkTaxConsistency() に一本化する。
+ * ここで「安全な値」に丸めるのは、モデルがそもそも値を返さなかった（欠測）場合の
+ * 最小限のフォールバック計算のみに限定する。
  */
-function normalizeOcrResult(raw: Record<string, unknown>, direction: Direction): OcrResult {
+export function normalizeOcrResult(raw: Record<string, unknown>, direction: Direction): OcrResult {
   const safeTotal = Math.max(0, Number(raw.total) || 0);
   const safeTaxRate = Number(raw.taxRate) === 0.08 ? 0.08 : 0.1;
-  const safeTax = Number.isFinite(Number(raw.tax)) && Number(raw.tax) >= 0
-    ? Math.round(Number(raw.tax))
-    : Math.round(safeTotal - safeTotal / (1 + safeTaxRate));
 
-  const parsedAmount = Number(raw.amount);
-  const reconciledAmount = Math.max(0, safeTotal - safeTax);
-  const safeAmount =
-    Number.isFinite(parsedAmount) && parsedAmount >= 0 && Math.abs(parsedAmount - reconciledAmount) <= 1
-      ? Math.round(parsedAmount)
-      : reconciledAmount;
+  const rawTax = Number(raw.tax);
+  const safeTax = Number.isFinite(rawTax) && rawTax >= 0
+    ? Math.round(rawTax)
+    : Math.round(safeTotal - safeTotal / (1 + safeTaxRate)); // taxが欠測のときだけのフォールバック
+
+  const rawAmount = Number(raw.amount);
+  const safeAmount = Number.isFinite(rawAmount) && rawAmount >= 0
+    ? Math.round(rawAmount)
+    : Math.max(0, safeTotal - safeTax); // amountが欠測のときだけのフォールバック
 
   const documentType = ['receipt', 'invoice', 'statement', 'other'].includes(String(raw.documentType))
     ? (raw.documentType as OcrResult['documentType'])
     : 'other';
 
+  const rawDate = typeof raw.date === 'string' ? raw.date.trim() : '';
+
   return {
     documentType,
     merchant: typeof raw.merchant === 'string' ? raw.merchant.trim() : '',
-    date: typeof raw.date === 'string' && raw.date ? raw.date : new Date().toISOString().slice(0, 10),
+    // 日付が読み取れなかった場合は「今日」で埋めず空文字のままにする。
+    // 呼び出し側（ingestInvoice.ts）が issueDate=null として扱い、重複検知・経過措置控除率判定・
+    // 月次集計を誤らせないようにし、承認キューで「発行日未確認」として要確認に回す。
+    date: /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : '',
     total: safeTotal,
     tax: safeTax,
     amount: safeAmount,

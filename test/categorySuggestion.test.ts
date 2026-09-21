@@ -28,6 +28,12 @@ describe('suggestFromKeywords', () => {
     expect(suggestFromKeywords('携帯電話料金', 'expense').category).toBe('通信費');
   });
 
+  it('prefers the more specific 駐車場代 (vehicle expense) over the broader 駐車場 (travel expense)', () => {
+    expect(suggestFromKeywords('月極駐車場代', 'expense').category).toBe('車両費');
+    // 「代」が付かない一般的な駐車場利用は引き続き旅費交通費のまま
+    expect(suggestFromKeywords('出張先の駐車場', 'expense').category).toBe('旅費交通費');
+  });
+
   it('returns null for unmatched text', () => {
     expect(suggestFromKeywords('謎の請求', 'expense').category).toBeNull();
   });
