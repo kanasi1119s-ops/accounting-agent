@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>決算書類 — accounting-agent</title>
+<style>
+  :root { --border: #dfe3e8; --muted: #6b7280; --accent: #4f46e5; --ok: #059669; --danger: #dc2626; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; background: #f5f6f8; color: #1f2937; }
+  header { background: #111827; color: white; padding: 16px 24px; }
+  header a { color: #93c5fd; text-decoration: none; font-size: 13px; margin-right: 16px; }
+  header h1 { font-size: 16px; margin: 8px 0 0; font-weight: 700; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 16px 80px; }
+  section { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin: 0 0 14px; display: flex; align-items: center; justify-content: space-between; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid #eee; }
+  th { color: var(--muted); font-weight: 700; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .total-row td { font-weight: 700; border-top: 2px solid #333; }
+  .year-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .year-row input { width: 100px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font: inherit; }
+  button, a.btn { border: none; border-radius: 8px; padding: 8px 14px; font-size: 12px; font-weight: 700; cursor: pointer; background: var(--accent); color: white; text-decoration: none; display: inline-block; }
+  button.secondary, a.btn.secondary { background: #6b7280; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+  .badge.ok { background: #d1fae5; color: #065f46; }
+  .badge.warn { background: #fef3c7; color: #92400e; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .csv-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; }
+  .kv .num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← 承認キュー</a><a href="/profile.html">事業者プロフィール →</a><a href="/fixed-assets.html">固定資産台帳 →</a>
+  <h1>決算書類</h1>
+</header>
+<main>
+  <div class="year-row">
+    対象年度: <input type="number" id="year" />
+    <button id="loadBtn">この年度で計算</button>
+    <span class="note">※ 承認済み（status=approved）の証憑のみを集計します。税率・控除額は年度により改正されるため、実際の申告前に必ず国税庁の最新資料で確認してください。</span>
+  </div>
+
+  <section>
+    <h2>損益計算書</h2>
+    <div id="plContent"></div>
+  </section>
+
+  <section>
+    <h2>貸借対照表</h2>
+    <div id="bsContent"></div>
+  </section>
+
+  <section>
+    <h2>消費税申告書（試算）</h2>
+    <div id="ctContent"></div>
+  </section>
+
+  <section>
+    <h2>所得税・確定申告（試算）</h2>
+    <div id="itContent"></div>
+  </section>
+
+  <section>
+    <h2>データのエクスポート</h2>
+    <div class="csv-row">
+      <a class="btn secondary" id="journalCsv" href="#">仕訳日記帳CSV</a>
+      <a class="btn secondary" id="ledgerCsv" href="#">総勘定元帳CSV</a>
+      <a class="btn secondary" id="taxClassCsv" href="#">消費税区分別集計CSV</a>
+    </div>
+    <div class="note">会計ソフトへの移行や、税理士へ渡す際にご利用ください。</div>
+  </section>
+</main>
+<script>
+function yen(n) {
+  return `¥${Math.round(Number(n) || 0).toLocaleString()}`;
+}
+
+function renderKvTable(obj, order) {
+  const keys = order || Object.keys(obj);
+  const rows = keys.filter((k) => obj[k] !== undefined).map((k) => `
+    <tr><td>${k}</td><td class="num">${yen(obj[k])}</td></tr>
+  `).join('');
+  return `<table><tbody>${rows}</tbody></table>`;
+}
+
+async function loadPL(year) {
+  const res = await fetch(`/api/reports/profit-loss?from=${year}-01-01&to=${year}-12-31`);
+  const json = await res.json();
+  if (!json.success) { document.getElementById('plContent').textContent = '取得できませんでした。'; return; }
+  const pl = json.data.profitLoss;
+
+  const revRows = Object.entries(pl.revenueByAccount).map(([k, v]) => `<tr><td>${k}</td><td class="num">${yen(v)}</td></tr>`).join('');
+  const expRows = Object.entries(pl.expenseByAccount).map(([k, v]) => `<tr><td>${k}</td><td class="num">${yen(v)}</td></tr>`).join('');
+
+  document.getElementById('plContent').innerHTML = `
+    <table>
+      <thead><tr><th>収益科目</th><th class="num">金額</th></tr></thead>
+      <tbody>${revRows}<tr class="total-row"><td>売上（収入）金額 計</td><td class="num">${yen(pl.totalRevenue)}</td></tr></tbody>
+    </table>
+    <table style="margin-top:12px;">
+      <thead><tr><th>経費科目</th><th class="num">金額</th></tr></thead>
+      <tbody>${expRows}<tr class="total-row"><td>経費 計</td><td class="num">${yen(pl.totalExpense)}</td></tr></tbody>
+    </table>
+    <table style="margin-top:12px;">
+      <tbody>
+        <tr><td>売上原価（期首棚卸+仕入-期末棚卸）</td><td class="num">${yen(pl.costOfSales)}</td></tr>
+        <tr><td>青色申告特別控除前の所得金額</td><td class="num">${yen(pl.incomeBeforeDeduction)}</td></tr>
+        <tr><td>青色申告特別控除</td><td class="num">-${yen(pl.blueDeduction)}</td></tr>
+        <tr class="total-row"><td>所得金額（事業所得）</td><td class="num">${yen(pl.netIncome)}</td></tr>
+      </tbody>
+    </table>
+  `;
+  return pl;
+}
+
+async function loadBS(year) {
+  const res = await fetch(`/api/reports/balance-sheet?year=${year}`);
+  const json = await res.json();
+  if (!json.success) { document.getElementById('bsContent').textContent = '取得できませんでした。'; return; }
+  const bs = json.data.balanceSheet;
+
+  const assetRows = Object.entries(bs.assetsClosing).map(([k, v]) => `<tr><td>${k}</td><td class="num">${yen(v)}</td></tr>`).join('');
+  const liabRows = Object.entries(bs.liabilitiesClosing).map(([k, v]) => `<tr><td>${k}</td><td class="num">${yen(v)}</td></tr>`).join('');
+  const equityRows = Object.entries(bs.equityClosing).map(([k, v]) => `<tr><td>${k}</td><td class="num">${yen(v)}</td></tr>`).join('');
+
+  const badge = bs.balanced
+    ? '<span class="badge ok">貸借一致</span>'
+    : `<span class="badge warn">差額 ${yen(bs.difference)}（期首残高・按分等をご確認ください）</span>`;
+
+  document.getElementById('bsContent').innerHTML = `
+    <div style="margin-bottom:10px;">${badge}</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div>
+        <table><thead><tr><th>資産（期末）</th><th class="num">金額</th></tr></thead>
+        <tbody>${assetRows}<tr class="total-row"><td>資産合計</td><td class="num">${yen(bs.totalAssetsClosing)}</td></tr></tbody></table>
+      </div>
+      <div>
+        <table><thead><tr><th>負債（期末）</th><th class="num">金額</th></tr></thead>
+        <tbody>${liabRows}<tr class="total-row"><td>負債合計</td><td class="num">${yen(bs.totalLiabilitiesClosing)}</td></tr></tbody></table>
+        <table style="margin-top:12px;"><thead><tr><th>資本（期末）</th><th class="num">金額</th></tr></thead>
+        <tbody>${equityRows}</tbody></table>
+      </div>
+    </div>
+  `;
+}
+
+async function loadCT(year) {
+  const res = await fetch(`/api/reports/consumption-tax?year=${year}`);
+  const json = await res.json();
+  if (!json.success) { document.getElementById('ctContent').textContent = '取得できませんでした。'; return; }
+  const ct = json.data;
+
+  if (!ct.applicable) {
+    document.getElementById('ctContent').innerHTML = `<p class="note">${ct.notes.join(' ')}</p>`;
+    return;
+  }
+
+  document.getElementById('ctContent').innerHTML = `
+    <div class="kv">
+      <div>方式</div><div>${ct.methodLabel}</div>
+      <div>課税売上高（税込）</div><div class="num">${yen(ct.taxableSalesGross)}</div>
+      <div>課税標準額</div><div class="num">${yen(ct.taxBase)}</div>
+      <div>課税売上に係る消費税額</div><div class="num">${yen(ct.outputTax)}</div>
+      <div>控除対象仕入税額</div><div class="num">${yen(ct.inputTax)}</div>
+      <div>差引税額（国税）</div><div class="num">${yen(ct.nationalTax)}</div>
+      <div>地方消費税額</div><div class="num">${yen(ct.localTax)}</div>
+      <div><strong>合計納付税額</strong></div><div class="num"><strong>${yen(ct.totalTax)}</strong></div>
+      <div>中間納付税額</div><div class="num">-${yen(ct.interimPayment)}</div>
+      <div><strong>${ct.refund > 0 ? '還付額' : '納付額'}</strong></div><div class="num"><strong>${yen(ct.refund > 0 ? ct.refund : ct.taxDue)}</strong></div>
+    </div>
+    <ul class="note">${ct.notes.map((n) => `<li>${n}</li>`).join('')}</ul>
+  `;
+}
+
+async function loadIT(year) {
+  const res = await fetch(`/api/reports/income-tax?year=${year}`);
+  const json = await res.json();
+  if (!json.success) { document.getElementById('itContent').textContent = '取得できませんでした。'; return; }
+  const it = json.data.incomeTax;
+  const dep = json.data.depreciation;
+
+  document.getElementById('itContent').innerHTML = `
+    ${dep > 0 ? `<p class="note">固定資産台帳から当年分の減価償却費 ${yen(dep)} を経費に反映済みです。</p>` : ''}
+    <div class="kv">
+      <div>事業所得</div><div class="num">${yen(it.businessIncome)}</div>
+      <div>給与所得</div><div class="num">${yen(it.salaryIncome)}</div>
+      <div>雑所得</div><div class="num">${yen(it.miscIncome)}</div>
+      <div><strong>合計所得金額</strong></div><div class="num"><strong>${yen(it.totalIncome)}</strong></div>
+      <div>所得控除合計</div><div class="num">-${yen(it.totalDeductions)}</div>
+      <div><strong>課税される所得金額</strong></div><div class="num"><strong>${yen(it.taxableIncome)}</strong></div>
+      <div>上記に対する税額</div><div class="num">${yen(it.taxOnIncome)}</div>
+      <div>税額控除</div><div class="num">-${yen(it.taxCredit)}</div>
+      <div>復興特別所得税</div><div class="num">${yen(it.reconstructionSurtax)}</div>
+      <div><strong>所得税及び復興特別所得税の額</strong></div><div class="num"><strong>${yen(it.totalTax)}</strong></div>
+      <div>源泉徴収税額</div><div class="num">-${yen(it.withholdingTax)}</div>
+      <div>予定納税額</div><div class="num">-${yen(it.estimatedPrepaid)}</div>
+      <div><strong>${it.refund > 0 ? '還付される税金' : '納める税金'}</strong></div><div class="num"><strong>${yen(it.refund > 0 ? it.refund : it.taxDue)}</strong></div>
+    </div>
+    <p class="note">参考: 住民税概算 ${yen(it.estimatedResidentTax)} ／ 個人事業税概算 ${yen(it.estimatedBusinessTax)}（法定業種・専従者控除等により変動します）</p>
+  `;
+}
+
+async function loadAll() {
+  const year = Number(document.getElementById('year').value);
+  document.getElementById('journalCsv').href = `/api/reports/journal-csv?year=${year}`;
+  document.getElementById('ledgerCsv').href = `/api/reports/general-ledger-csv?year=${year}`;
+  document.getElementById('taxClassCsv').href = `/api/reports/tax-class-csv?year=${year}`;
+  await loadPL(year);
+  await loadBS(year);
+  await loadCT(year);
+  await loadIT(year);
+}
+
+document.getElementById('year').value = new Date().getFullYear();
+document.getElementById('loadBtn').addEventListener('click', loadAll);
+loadAll();
+</script>
+</body>
+</html>

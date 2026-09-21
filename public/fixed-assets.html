@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>固定資産台帳 — accounting-agent</title>
+<style>
+  :root { --border: #dfe3e8; --muted: #6b7280; --accent: #4f46e5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; background: #f5f6f8; color: #1f2937; }
+  header { background: #111827; color: white; padding: 16px 24px; }
+  header a { color: #93c5fd; text-decoration: none; font-size: 13px; margin-right: 16px; }
+  header h1 { font-size: 16px; margin: 8px 0 0; font-weight: 700; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 16px 80px; }
+  section { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 700; font-size: 11px; }
+  input, select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; font: inherit; }
+  .form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+  .form-grid label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  .form-grid input, .form-grid select { width: 100%; }
+  button { border: none; border-radius: 8px; padding: 8px 16px; font-size: 12px; font-weight: 700; cursor: pointer; background: var(--accent); color: white; }
+  button.danger { background: #dc2626; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #111827; color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.2s; }
+  .toast.show { opacity: 1; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 4px; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← 承認キュー</a><a href="/reports.html">決算書類 →</a><a href="/profile.html">事業者プロフィール →</a>
+  <h1>固定資産台帳（減価償却）</h1>
+</header>
+<main>
+  <section>
+    <h2>資産を登録</h2>
+    <div class="form-grid">
+      <div><label>資産名</label><input id="newName" placeholder="例: ノートパソコン" /></div>
+      <div><label>取得日</label><input type="date" id="newDate" /></div>
+      <div><label>取得価額</label><input type="number" id="newCost" /></div>
+      <div><label>耐用年数</label><input type="number" id="newLife" min="2" max="20" value="4" /></div>
+      <div><label>償却方法</label>
+        <select id="newMethod"><option value="straight">定額法</option><option value="declining">定率法</option></select>
+      </div>
+      <div><label>事業専用割合 (%)</label><input type="number" id="newRatio" value="100" min="0" max="100" /></div>
+      <div><label>導入前の累積償却額</label><input type="number" id="newPrior" value="0" /></div>
+      <div style="display:flex; align-items:flex-end;"><button id="addBtn">登録</button></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>台帳一覧・当年分の償却計算</h2>
+    <div style="margin-bottom:10px;">対象年度: <input type="number" id="year" style="width:100px;" /> <button id="loadBtn" style="background:#6b7280;">再計算</button></div>
+    <table>
+      <thead>
+        <tr>
+          <th>資産名</th><th>取得日</th><th>取得価額</th><th>耐用年数</th><th>方法</th><th>事業割合</th>
+          <th>当年償却費(事業分)</th><th>累積償却額</th><th>期末帳簿価額</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="emptyMsg" class="empty" style="display:none;">登録されている固定資産はありません。</div>
+    <div id="totalRow" style="margin-top:10px; font-weight:700; font-size:13px;"></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+async function loadTable() {
+  const year = Number(document.getElementById('year').value);
+  const res = await fetch(`/api/reports/depreciation?year=${year}`);
+  const json = await res.json();
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = '';
+
+  if (!json.success || json.data.length === 0) {
+    document.getElementById('emptyMsg').style.display = 'block';
+    document.getElementById('totalRow').textContent = '';
+    return;
+  }
+  document.getElementById('emptyMsg').style.display = 'none';
+
+  let total = 0;
+  for (const row of json.data) {
+    const a = row.asset;
+    const r = row.result;
+    total += r.businessPortionDepreciation;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${a.name}</td>
+      <td>${a.acquisitionDate}</td>
+      <td>¥${a.acquisitionCost.toLocaleString()}</td>
+      <td>${a.usefulLife}年</td>
+      <td>${a.method === 'straight' ? '定額法' : '定率法'}</td>
+      <td>${Math.round(a.businessRatio * 100)}%</td>
+      <td>¥${r.businessPortionDepreciation.toLocaleString()}</td>
+      <td>¥${r.accumulatedDepreciation.toLocaleString()}</td>
+      <td>¥${r.bookValueAtYearEnd.toLocaleString()}${r.isFullyDepreciated ? '（償却済）' : ''}</td>
+      <td><button class="danger" data-id="${a.id}">削除</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+  document.getElementById('totalRow').textContent = `当年分 減価償却費 合計（事業分）: ¥${total.toLocaleString()}`;
+
+  tbody.querySelectorAll('button.danger').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('この固定資産を削除しますか？')) return;
+      await fetch(`/api/fixed-assets/${btn.dataset.id}`, { method: 'DELETE' });
+      toast('削除しました');
+      loadTable();
+    });
+  });
+}
+
+async function addAsset() {
+  const payload = {
+    name: document.getElementById('newName').value.trim(),
+    acquisitionDate: document.getElementById('newDate').value,
+    acquisitionCost: Number(document.getElementById('newCost').value || 0),
+    usefulLife: Number(document.getElementById('newLife').value || 4),
+    method: document.getElementById('newMethod').value,
+    businessRatio: Math.min(100, Math.max(0, Number(document.getElementById('newRatio').value || 100))) / 100,
+    priorAccumulatedDepreciation: Number(document.getElementById('newPrior').value || 0),
+  };
+  if (!payload.name || !payload.acquisitionDate || !payload.acquisitionCost) {
+    toast('資産名・取得日・取得価額は必須です');
+    return;
+  }
+  const res = await fetch('/api/fixed-assets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json();
+  if (json.success) {
+    toast('登録しました');
+    document.getElementById('newName').value = '';
+    document.getElementById('newCost').value = '';
+    loadTable();
+  } else {
+    toast('エラー: ' + (json.error || '登録に失敗しました'));
+  }
+}
+
+document.getElementById('year').value = new Date().getFullYear();
+document.getElementById('addBtn').addEventListener('click', addAsset);
+document.getElementById('loadBtn').addEventListener('click', loadTable);
+loadTable();
+</script>
+</body>
+</html>

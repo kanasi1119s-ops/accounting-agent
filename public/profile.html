@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>事業者プロフィール設定 — accounting-agent</title>
+<style>
+  :root { --border: #dfe3e8; --muted: #6b7280; --accent: #4f46e5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; background: #f5f6f8; color: #1f2937; }
+  header { background: #111827; color: white; padding: 16px 24px; }
+  header a { color: #93c5fd; text-decoration: none; font-size: 13px; margin-right: 16px; }
+  header h1 { font-size: 16px; margin: 8px 0 0; font-weight: 700; }
+  main { max-width: 760px; margin: 0 auto; padding: 20px 16px 80px; }
+  section { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  h2 { font-size: 14px; color: var(--muted); margin: 0 0 14px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 16px; }
+  .grid.wide { grid-template-columns: 1fr; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 13px; font: inherit; }
+  input[type=checkbox] { width: auto; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  button { border: none; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 700; cursor: pointer; background: var(--accent); color: white; }
+  .year-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .year-row input { width: 100px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #111827; color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.2s; }
+  .toast.show { opacity: 1; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← 承認キュー</a><a href="/reports.html">決算書類 →</a><a href="/fixed-assets.html">固定資産台帳 →</a>
+  <h1>事業者プロフィール設定</h1>
+</header>
+<main>
+  <div class="year-row">
+    対象年度: <input type="number" id="fiscalYear" />
+    <button id="loadBtn" style="background:#6b7280;">この年度を読み込む</button>
+  </div>
+
+  <section>
+    <h2>基本情報</h2>
+    <div class="grid">
+      <div class="field"><label>氏名</label><input id="name" /></div>
+      <div class="field"><label>フリガナ</label><input id="nameKana" /></div>
+      <div class="field"><label>屋号</label><input id="tradeName" /></div>
+      <div class="field"><label>職業</label><input id="occupation" /></div>
+      <div class="field"><label>郵便番号</label><input id="postalCode" /></div>
+      <div class="field"><label>電話番号</label><input id="phone" /></div>
+      <div class="field" style="grid-column:1/-1;"><label>納税地（住所）</label><input id="address" /></div>
+      <div class="field" style="grid-column:1/-1;"><label>事業の内容</label><input id="businessDescription" /></div>
+      <div class="field"><label>提出先税務署</label><input id="taxOffice" /></div>
+      <div class="field"><label>開業日</label><input type="date" id="startDate" /></div>
+      <div class="field"><label>インボイス登録番号</label><input id="invoiceRegNumber" placeholder="T1234567890123" /></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>申告区分</h2>
+    <div class="grid">
+      <div class="field"><label>申告の種類</label>
+        <select id="filingType"><option value="blue">青色申告</option><option value="white">白色申告</option></select>
+      </div>
+      <div class="field"><label>青色申告特別控除額</label>
+        <select id="blueDeduction">
+          <option value="650000">65万円（e-Tax・電子帳簿保存）</option>
+          <option value="550000">55万円</option>
+          <option value="100000">10万円</option>
+          <option value="0">0円</option>
+        </select>
+      </div>
+      <div class="checkbox-row"><input type="checkbox" id="useEtax" /><label for="useEtax">e-Tax申告 または 電子帳簿保存を行う</label></div>
+    </div>
+    <div class="grid" style="margin-top:10px;">
+      <div class="checkbox-row"><input type="checkbox" id="hasFamilyEmployee" /><label for="hasFamilyEmployee">事業専従者がいる</label></div>
+      <div class="field"><label>専従者給与（年額）</label><input type="number" id="familyEmployeeSalary" /></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>消費税</h2>
+    <div class="grid">
+      <div class="checkbox-row"><input type="checkbox" id="ctIsTaxable" /><label for="ctIsTaxable">課税事業者である</label></div>
+      <div class="field"><label>計算方式</label>
+        <select id="ctMethod">
+          <option value="principle">本則課税</option>
+          <option value="simplified">簡易課税</option>
+          <option value="special20">2割特例</option>
+        </select>
+      </div>
+      <div class="field"><label>簡易課税の事業区分</label>
+        <select id="ctSimplifiedBusinessType">
+          <option value="1">第1種（卸売業）90%</option>
+          <option value="2">第2種（小売業等）80%</option>
+          <option value="3">第3種（製造業等）70%</option>
+          <option value="4">第4種（飲食店業等）60%</option>
+          <option value="5">第5種（サービス業等）50%</option>
+          <option value="6">第6種（不動産業）40%</option>
+        </select>
+      </div>
+      <div class="field"><label>中間納付税額</label><input type="number" id="ctInterimPayment" /></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>期首残高（貸借対照表の1月1日欄）</h2>
+    <div class="grid">
+      <div class="field"><label>現金</label><input type="number" id="ob現金" /></div>
+      <div class="field"><label>普通預金</label><input type="number" id="ob普通預金" /></div>
+      <div class="field"><label>売掛金</label><input type="number" id="ob売掛金" /></div>
+      <div class="field"><label>棚卸資産</label><input type="number" id="ob棚卸資産" /></div>
+      <div class="field"><label>固定資産</label><input type="number" id="ob固定資産" /></div>
+      <div class="field"><label>その他資産</label><input type="number" id="obその他資産" /></div>
+      <div class="field"><label>買掛金</label><input type="number" id="ob買掛金" /></div>
+      <div class="field"><label>未払金</label><input type="number" id="ob未払金" /></div>
+      <div class="field"><label>借入金</label><input type="number" id="ob借入金" /></div>
+      <div class="field"><label>その他負債</label><input type="number" id="obその他負債" /></div>
+      <div class="field"><label>元入金（空欄なら資産-負債で自動計算）</label><input type="number" id="ob元入金" /></div>
+      <div class="field"><label>期末棚卸高（決算整理）</label><input type="number" id="closingInventory" /></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>所得控除</h2>
+    <div class="grid">
+      <div class="field"><label>社会保険料控除</label><input type="number" id="dSocialInsurance" /></div>
+      <div class="field"><label>小規模企業共済等掛金控除</label><input type="number" id="dSmallBusinessMutualAid" /></div>
+      <div class="field"><label>生命保険料控除</label><input type="number" id="dLifeInsurance" /></div>
+      <div class="field"><label>地震保険料控除</label><input type="number" id="dEarthquakeInsurance" /></div>
+      <div class="field"><label>医療費控除</label><input type="number" id="dMedical" /></div>
+      <div class="field"><label>寄附金控除</label><input type="number" id="dDonation" /></div>
+      <div class="field"><label>配偶者(特別)控除</label><input type="number" id="dSpouse" /></div>
+      <div class="field"><label>扶養控除</label><input type="number" id="dDependent" /></div>
+      <div class="field"><label>基礎控除</label><input type="number" id="dBasic" /></div>
+      <div class="field"><label>その他人的控除</label><input type="number" id="dOtherPersonal" /></div>
+      <div class="field"><label>税額控除（住宅ローン控除等）</label><input type="number" id="dTaxCredit" /></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>その他の所得・源泉徴収</h2>
+    <div class="grid">
+      <div class="field"><label>給与収入</label><input type="number" id="oiSalaryRevenue" /></div>
+      <div class="field"><label>給与所得（控除後）</label><input type="number" id="oiSalaryIncome" /></div>
+      <div class="field"><label>雑所得</label><input type="number" id="oiMiscIncome" /></div>
+      <div class="field"><label>源泉徴収税額</label><input type="number" id="oiWithholdingTax" /></div>
+      <div class="field"><label>予定納税額</label><input type="number" id="oiEstimatedPrepaid" /></div>
+    </div>
+    <div class="hint">税率・控除額は年度により改正されるため、実際の申告前に必ず国税庁の最新資料で確認してください。このソフトの計算結果はあくまで試算です。</div>
+  </section>
+
+  <button id="saveBtn">保存する</button>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+function currentYear() {
+  return new Date().getFullYear();
+}
+
+const OB_KEYS = ['現金', '普通預金', '売掛金', '棚卸資産', '固定資産', 'その他資産', '買掛金', '未払金', '借入金', 'その他負債', '元入金'];
+
+async function load() {
+  const year = document.getElementById('fiscalYear').value || currentYear();
+  const res = await fetch(`/api/business-profile/${year}`);
+  const json = await res.json();
+  if (!json.success) { toast('読み込みに失敗しました'); return; }
+  const p = json.data;
+
+  document.getElementById('fiscalYear').value = p.fiscalYear;
+  document.getElementById('name').value = p.name || '';
+  document.getElementById('nameKana').value = p.nameKana || '';
+  document.getElementById('tradeName').value = p.tradeName || '';
+  document.getElementById('occupation').value = p.occupation || '';
+  document.getElementById('postalCode').value = p.postalCode || '';
+  document.getElementById('phone').value = p.phone || '';
+  document.getElementById('address').value = p.address || '';
+  document.getElementById('businessDescription').value = p.businessDescription || '';
+  document.getElementById('taxOffice').value = p.taxOffice || '';
+  document.getElementById('startDate').value = p.startDate || '';
+  document.getElementById('invoiceRegNumber').value = p.invoiceRegNumber || '';
+  document.getElementById('filingType').value = p.filingType || 'blue';
+  document.getElementById('blueDeduction').value = String(p.blueDeduction ?? 650000);
+  document.getElementById('useEtax').checked = !!p.useEtax;
+  document.getElementById('hasFamilyEmployee').checked = !!p.hasFamilyEmployee;
+  document.getElementById('familyEmployeeSalary').value = p.familyEmployeeSalary || 0;
+
+  document.getElementById('ctIsTaxable').checked = !!p.consumptionTax?.isTaxable;
+  document.getElementById('ctMethod').value = p.consumptionTax?.method || 'principle';
+  document.getElementById('ctSimplifiedBusinessType').value = String(p.consumptionTax?.simplifiedBusinessType ?? 5);
+  document.getElementById('ctInterimPayment').value = p.consumptionTax?.interimPayment || 0;
+
+  for (const k of OB_KEYS) {
+    const el = document.getElementById('ob' + k);
+    if (el) el.value = p.openingBalances?.[k] ?? '';
+  }
+  document.getElementById('closingInventory').value = p.closingInventory || 0;
+
+  document.getElementById('dSocialInsurance').value = p.deductions?.socialInsurance || 0;
+  document.getElementById('dSmallBusinessMutualAid').value = p.deductions?.smallBusinessMutualAid || 0;
+  document.getElementById('dLifeInsurance').value = p.deductions?.lifeInsurance || 0;
+  document.getElementById('dEarthquakeInsurance').value = p.deductions?.earthquakeInsurance || 0;
+  document.getElementById('dMedical').value = p.deductions?.medical || 0;
+  document.getElementById('dDonation').value = p.deductions?.donation || 0;
+  document.getElementById('dSpouse').value = p.deductions?.spouse || 0;
+  document.getElementById('dDependent').value = p.deductions?.dependent || 0;
+  document.getElementById('dBasic').value = p.deductions?.basic ?? 480000;
+  document.getElementById('dOtherPersonal').value = p.deductions?.otherPersonal || 0;
+  document.getElementById('dTaxCredit').value = p.deductions?.taxCredit || 0;
+
+  document.getElementById('oiSalaryRevenue').value = p.otherIncome?.salaryRevenue || 0;
+  document.getElementById('oiSalaryIncome').value = p.otherIncome?.salaryIncome || 0;
+  document.getElementById('oiMiscIncome').value = p.otherIncome?.miscIncome || 0;
+  document.getElementById('oiWithholdingTax').value = p.otherIncome?.withholdingTax || 0;
+  document.getElementById('oiEstimatedPrepaid').value = p.otherIncome?.estimatedPrepaid || 0;
+
+  toast(`${p.fiscalYear}年度を読み込みました`);
+}
+
+async function save() {
+  const year = Number(document.getElementById('fiscalYear').value || currentYear());
+  const num = (id) => Number(document.getElementById(id).value || 0);
+  const str = (id) => document.getElementById(id).value.trim();
+
+  const openingBalances = {};
+  for (const k of OB_KEYS) {
+    const v = document.getElementById('ob' + k).value;
+    if (k === '元入金') {
+      if (v !== '') openingBalances[k] = Number(v);
+    } else {
+      openingBalances[k] = Number(v || 0);
+    }
+  }
+
+  const profile = {
+    fiscalYear: year,
+    name: str('name'), nameKana: str('nameKana'), tradeName: str('tradeName'),
+    postalCode: str('postalCode'), address: str('address'), phone: str('phone'),
+    occupation: str('occupation'), businessDescription: str('businessDescription'),
+    taxOffice: str('taxOffice'), startDate: str('startDate'), invoiceRegNumber: str('invoiceRegNumber'),
+    filingType: document.getElementById('filingType').value,
+    blueDeduction: Number(document.getElementById('blueDeduction').value),
+    useEtax: document.getElementById('useEtax').checked,
+    hasFamilyEmployee: document.getElementById('hasFamilyEmployee').checked,
+    familyEmployeeSalary: num('familyEmployeeSalary'),
+    consumptionTax: {
+      isTaxable: document.getElementById('ctIsTaxable').checked,
+      method: document.getElementById('ctMethod').value,
+      simplifiedBusinessType: Number(document.getElementById('ctSimplifiedBusinessType').value),
+      accounting: 'tax_included',
+      interimPayment: num('ctInterimPayment'),
+    },
+    openingBalances,
+    closingInventory: num('closingInventory'),
+    deductions: {
+      socialInsurance: num('dSocialInsurance'),
+      smallBusinessMutualAid: num('dSmallBusinessMutualAid'),
+      lifeInsurance: num('dLifeInsurance'),
+      earthquakeInsurance: num('dEarthquakeInsurance'),
+      medical: num('dMedical'),
+      donation: num('dDonation'),
+      spouse: num('dSpouse'),
+      dependent: num('dDependent'),
+      basic: num('dBasic'),
+      otherPersonal: num('dOtherPersonal'),
+      taxCredit: num('dTaxCredit'),
+    },
+    otherIncome: {
+      salaryRevenue: num('oiSalaryRevenue'),
+      salaryIncome: num('oiSalaryIncome'),
+      miscIncome: num('oiMiscIncome'),
+      withholdingTax: num('oiWithholdingTax'),
+      estimatedPrepaid: num('oiEstimatedPrepaid'),
+    },
+  };
+
+  const res = await fetch(`/api/business-profile/${year}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+  const json = await res.json();
+  toast(json.success ? '保存しました' : 'エラー: 保存に失敗しました');
+}
+
+document.getElementById('fiscalYear').value = currentYear();
+document.getElementById('loadBtn').addEventListener('click', load);
+document.getElementById('saveBtn').addEventListener('click', save);
+load();
+</script>
+</body>
+</html>

@@ -6,6 +6,8 @@ import { approvalsRouter } from './routes/approvals.js';
 import { settingsRouter } from './routes/settings.js';
 import { reportsRouter } from './routes/reports.js';
 import { vendorsRouter } from './routes/vendors.js';
+import { businessProfileRouter } from './routes/businessProfile.js';
+import { fixedAssetsRouter } from './routes/fixedAssets.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -27,6 +29,8 @@ app.use('/api/approvals', approvalsRouter());
 app.use('/api/settings', settingsRouter());
 app.use('/api/reports', reportsRouter());
 app.use('/api/vendors', vendorsRouter());
+app.use('/api/business-profile', businessProfileRouter());
+app.use('/api/fixed-assets', fixedAssetsRouter());
 
 // グローバルエラーハンドラー。asyncHandlerでキャッチされた例外はここに集約される。
 // これが無いと、素の例外がExpressのデフォルトHTMLエラーページか、

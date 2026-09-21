@@ -13,6 +13,9 @@ const sample: LedgerSourceInvoice[] = [
     paymentMethod: '振込',
     description: '制作業務',
     businessRatio: null,
+    taxRate: 0.1,
+    taxClass: 'taxable',
+    invoiceRegistrationNumber: null,
   },
   {
     id: '2',
@@ -24,6 +27,9 @@ const sample: LedgerSourceInvoice[] = [
     paymentMethod: '現金',
     description: '事務用品',
     businessRatio: null,
+    taxRate: 0.1,
+    taxClass: 'taxable',
+    invoiceRegistrationNumber: null,
   },
 ];
 
@@ -37,6 +43,9 @@ const allocated: LedgerSourceInvoice = {
   paymentMethod: '振込',
   description: '電気代',
   businessRatio: 0.6,
+  taxRate: 0.1,
+  taxClass: 'taxable',
+  invoiceRegistrationNumber: null,
 };
 
 describe('businessTotal', () => {

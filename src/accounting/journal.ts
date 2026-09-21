@@ -5,6 +5,7 @@
  * フェーズ1では自動仕訳を行わないため、ここに渡すのは status='approved' の invoice のみを想定する。
  */
 import { accountKind } from './accounts.js';
+import type { BusinessProfile } from '../types/businessProfile.js';
 
 export interface LedgerSourceInvoice {
   id: string;
@@ -17,6 +18,11 @@ export interface LedgerSourceInvoice {
   description: string | null;
   /** 家事按分比率（0-1）。未設定（null）は100%（按分なし）として扱う。 */
   businessRatio: number | null;
+  /** 消費税申告書の集計に使う（未指定なら0.1として扱う） */
+  taxRate: number | null;
+  /** 消費税の課税区分（未指定なら課税扱い） */
+  taxClass: 'taxable' | 'nontaxable' | 'outofscope' | null;
+  invoiceRegistrationNumber: string | null;
 }
 
 /** 家事按分後の税込金額。「ソロAI帳簿」の businessTotal() 相当。 */
@@ -88,14 +94,35 @@ export interface ProfitLoss {
   expenseByAccount: Record<string, number>;
   totalRevenue: number;
   totalExpense: number;
+  /** 青色申告特別控除前の所得金額 */
+  incomeBeforeDeduction: number;
+  blueDeduction: number;
+  /** 青色申告特別控除後の所得金額（＝事業所得） */
   netIncome: number;
+  openingInventory: number;
+  closingInventory: number;
+  purchases: number;
+  costOfSales: number;
+  familyEmployeeSalary: number;
 }
 
-export function computeProfitLoss(invoices: LedgerSourceInvoice[]): ProfitLoss {
+/** 資産・負債・資本科目は貸借対照表の動きであって損益ではないため、損益計算から除外する */
+export function isBalanceSheetCategory(category: string | null): boolean {
+  if (!category) return false;
+  const kind = accountKind(category, 'expense');
+  return kind === 'asset' || kind === 'liability' || kind === 'equity';
+}
+
+/**
+ * 損益計算書を計算する。青色申告特別控除・専従者給与・期首期末棚卸高は
+ * BusinessProfile（未指定ならデフォルト値=0扱い）から取り込む。
+ */
+export function computeProfitLoss(invoices: LedgerSourceInvoice[], profile?: BusinessProfile): ProfitLoss {
   const revenueByAccount: Record<string, number> = {};
   const expenseByAccount: Record<string, number> = {};
+  const plInvoices = invoices.filter((inv) => !isBalanceSheetCategory(inv.category));
 
-  for (const inv of invoices) {
+  for (const inv of plInvoices) {
     const key = inv.category || (inv.direction === 'income' ? '売上高' : '雑費');
     const value = businessTotal(inv);
     if (inv.direction === 'income') {
@@ -105,15 +132,145 @@ export function computeProfitLoss(invoices: LedgerSourceInvoice[]): ProfitLoss {
     }
   }
 
+  const familyEmployeeSalary = profile?.hasFamilyEmployee ? Math.max(0, Number(profile.familyEmployeeSalary) || 0) : 0;
+  if (familyEmployeeSalary > 0) {
+    expenseByAccount['専従者給与'] = (expenseByAccount['専従者給与'] || 0) + familyEmployeeSalary;
+  }
+
+  const openingInventory = Math.max(0, Number(profile?.openingBalances?.棚卸資産) || 0);
+  const closingInventory = Math.max(0, Number(profile?.closingInventory) || 0);
+  const purchases = expenseByAccount['仕入高'] || 0;
+  const costOfSales = openingInventory + purchases - closingInventory;
+
   const totalRevenue = Object.values(revenueByAccount).reduce((a, b) => a + b, 0);
-  const totalExpense = Object.values(expenseByAccount).reduce((a, b) => a + b, 0);
+  const totalExpense = Object.entries(expenseByAccount)
+    .filter(([k]) => k !== '仕入高')
+    .reduce((a, [, v]) => a + v, 0);
+
+  const incomeBeforeDeduction = Math.round(totalRevenue - costOfSales - totalExpense);
+  const blueDeduction =
+    profile?.filingType === 'blue' ? Math.min(Math.max(0, incomeBeforeDeduction), profile.blueDeduction) : 0;
+  const netIncome = Math.max(0, incomeBeforeDeduction - blueDeduction);
 
   return {
     revenueByAccount,
     expenseByAccount,
     totalRevenue,
     totalExpense,
-    netIncome: totalRevenue - totalExpense,
+    incomeBeforeDeduction,
+    blueDeduction,
+    netIncome,
+    openingInventory,
+    closingInventory,
+    purchases,
+    costOfSales,
+    familyEmployeeSalary,
+  };
+}
+
+/* ============================================================
+   貸借対照表
+   ============================================================ */
+
+const ASSET_KEYS = ['現金', '普通預金', '売掛金', '棚卸資産', '固定資産', 'その他資産'] as const;
+const LIABILITY_KEYS = ['買掛金', '未払金', '借入金', 'その他負債'] as const;
+
+export interface BalanceSheet {
+  assetsOpening: Record<string, number>;
+  assetsClosing: Record<string, number>;
+  liabilitiesOpening: Record<string, number>;
+  liabilitiesClosing: Record<string, number>;
+  equityOpening: Record<string, number>;
+  equityClosing: Record<string, number>;
+  totalAssetsOpening: number;
+  totalAssetsClosing: number;
+  totalLiabilitiesOpening: number;
+  totalLiabilitiesClosing: number;
+  netIncome: number;
+  balanced: boolean;
+  difference: number;
+}
+
+/**
+ * 貸借対照表を計算する。期首残高はBusinessProfile.openingBalancesから、
+ * 期中の増減は承認済み仕訳（buildJournal）から積み上げる。
+ */
+export function computeBalanceSheet(
+  invoices: LedgerSourceInvoice[],
+  profile: BusinessProfile,
+  pl: ProfitLoss
+): BalanceSheet {
+  const ob = profile.openingBalances;
+
+  const assetsOpening: Record<string, number> = {};
+  ASSET_KEYS.forEach((k) => (assetsOpening[k] = Math.max(0, Number(ob[k]) || 0)));
+  const liabilitiesOpening: Record<string, number> = {};
+  LIABILITY_KEYS.forEach((k) => (liabilitiesOpening[k] = Math.max(0, Number(ob[k]) || 0)));
+
+  const totalAssetsOpening = Object.values(assetsOpening).reduce((a, b) => a + b, 0);
+  const totalLiabilitiesOpening = Object.values(liabilitiesOpening).reduce((a, b) => a + b, 0);
+  const capital =
+    typeof ob.元入金 === 'number' && !Number.isNaN(ob.元入金) ? ob.元入金 : totalAssetsOpening - totalLiabilitiesOpening;
+
+  const entries = buildJournal(invoices);
+  const delta: Record<string, number> = {};
+  for (const e of entries) {
+    for (const l of e.lines) {
+      const kind = accountKind(l.account);
+      if (kind === 'asset') delta[l.account] = (delta[l.account] || 0) + l.debit - l.credit;
+      if (kind === 'liability') delta[l.account] = (delta[l.account] || 0) + l.credit - l.debit;
+    }
+  }
+
+  const assetsClosing: Record<string, number> = { ...assetsOpening };
+  const liabilitiesClosing: Record<string, number> = { ...liabilitiesOpening };
+
+  for (const [acc, d] of Object.entries(delta)) {
+    const kind = accountKind(acc);
+    if (kind === 'asset') {
+      const key = (ASSET_KEYS as readonly string[]).includes(acc) ? acc : acc === '事業主貸' ? '事業主貸' : 'その他資産';
+      assetsClosing[key] = (assetsClosing[key] || 0) + d;
+    } else if (kind === 'liability') {
+      const key =
+        acc === 'クレジットカード'
+          ? '未払金'
+          : (LIABILITY_KEYS as readonly string[]).includes(acc)
+            ? acc
+            : acc === '事業主借'
+              ? '事業主借'
+              : 'その他負債';
+      liabilitiesClosing[key] = (liabilitiesClosing[key] || 0) + d;
+    }
+  }
+
+  assetsClosing['棚卸資産'] = pl.closingInventory;
+
+  const totalAssetsClosing = Object.values(assetsClosing).reduce((a, b) => a + b, 0);
+  const totalLiabilitiesClosing = Object.values(liabilitiesClosing).reduce((a, b) => a + b, 0);
+
+  const equityOpening = { 元入金: capital };
+  const equityClosing = {
+    元入金: capital,
+    青色申告特別控除前の所得金額: pl.incomeBeforeDeduction,
+  };
+
+  const rightClosing = totalLiabilitiesClosing + capital + pl.incomeBeforeDeduction;
+  const difference = Math.round(totalAssetsClosing - rightClosing);
+
+  return {
+    assetsOpening,
+    assetsClosing,
+    liabilitiesOpening,
+    liabilitiesClosing,
+    equityOpening,
+    equityClosing,
+    totalAssetsOpening,
+    totalAssetsClosing,
+    totalLiabilitiesOpening,
+    totalLiabilitiesClosing,
+    netIncome: pl.incomeBeforeDeduction,
+    balanced: Math.abs(difference) <= 1,
+    difference,
   };
 }
 

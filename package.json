@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "migrate": "tsx src/db/migrate.ts",
     "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "lint": "tsc -p tsconfig.lint.json"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -46,11 +46,13 @@ npm run dev
 - `migrations/` — プレーンSQLのマイグレーションファイル。`src/db/migrate.ts` が `schema_migrations` テーブルで適用済みを管理し、未適用分だけを順番に実行する。
 - `src/lib/` — OCRやDBに依存しない純粋ロジック（インボイス番号形式チェック、税抜税込整合性チェック、重複検知ハッシュ）。
 - `src/ocr/` — Gemini Vision呼び出し（画像・スキャンPDF用）と、テキスト埋め込み型PDFの直接テキスト抽出。
-- `src/accounting/` — 勘定科目マスタ、仕訳・決算集計ロジック、取引先履歴ベースの科目自動提案。
+- `src/accounting/` — 勘定科目マスタ、仕訳・決算集計ロジック（損益計算書・貸借対照表）、取引先履歴ベースの科目自動提案、固定資産減価償却。
+- `src/tax/` — 消費税申告書・所得税（確定申告）の試算ロジック（DB非依存の純粋関数）。
+- `src/types/businessProfile.ts` — 確定申告に必要な事業者プロフィールの型・デフォルト値。
 - `src/pipeline/ingestInvoice.ts` — OCR取込 → 検証 → 仕訳提案 → 承認キュー投入までを一気通貫で行うオーケストレーター。
-- `src/routes/` — Express APIルート（アップロード、承認、設定、レポート）。
+- `src/routes/` — Express APIルート（アップロード、承認、設定、レポート、事業者プロフィール、固定資産）。
 - `src/repositories/` — DBアクセス層。
-- `public/` — 承認キュー用の簡易画面（ビルド不要のvanilla HTML/JS）。`index.html` が一覧・取込・設定、`invoice.html` が証憑1件の詳細・手動修正・外貨レート指定、`vendors.html` が按分ルール設定。
+- `public/` — ビルド不要のvanilla HTML/JS画面。`index.html` が承認キュー一覧・取込、`invoice.html` が証憑1件の詳細・手動修正・外貨レート指定、`vendors.html` が按分ルール設定、`profile.html` が事業者プロフィール設定、`fixed-assets.html` が固定資産台帳、`reports.html` が決算書類（損益計算書・貸借対照表・消費税申告書・所得税試算・CSVエクスポート）。
 
 ## パイプラインの処理分岐
 
@@ -80,10 +82,28 @@ npm run dev
 | 機能 | 移植元 | 状況 |
 |---|---|---|
 | OCRプロンプト・レスポンス整形（税抜金額の突合ロジック含む） | `server.ts` (`/api/receipt-ocr`) | 移植・関数化 (`src/ocr/gemini.ts`) |
-| 勘定科目マスタ・複式仕訳・損益集計 | `src/accounting/{accounts,journal}.ts` | 移植・DBレコード向けに書き換え |
+| 勘定科目マスタ・複式仕訳・損益集計・貸借対照表 | `src/accounting/{accounts,journal}.ts` | 移植・DBレコード向けに書き換え |
+| 消費税申告書の試算（簡易課税/本則課税/2割特例） | `src/tax/consumptionTax.ts` | 移植 (`src/tax/consumptionTax.ts`) |
+| 所得税（確定申告）の試算・速算表 | `src/tax/incomeTax.ts` | 移植 (`src/tax/incomeTax.ts`) |
+| 固定資産台帳・減価償却費計算（定額法/定率法） | `src/accounting/depreciation.ts`, `src/core/fixedAssets.ts` | 移植。保存先をlocalStorageからDBに変更 (`src/accounting/depreciation.ts`, `fixed_assets`テーブル) |
+| 仕訳日記帳・総勘定元帳・消費税区分別集計のCSVエクスポート | `src/documents/exporters.ts` | 移植。クライアント側Blob生成からサーバー側CSV生成に変更 (`src/routes/reports.ts`) |
 | インボイス登録番号の形式チェック | — | 元コードに実装なし（プレースホルダー文言のみ）。新規実装 (`src/lib/invoiceNumber.ts`) |
 | 経過措置による仕入税額控除率の自動判定 | — | 元コードに実装なし。新規実装 |
 | 取引先履歴ベースの勘定科目自動提案（信頼度スコア付き） | — | 元コードはユーザー定義ルールのマッチングのみで履歴学習なし。新規実装 (`src/accounting/categorySuggestion.ts`) |
+
+## 決算書類（損益計算書・貸借対照表・消費税申告書・所得税試算）
+
+[/reports.html](public/reports.html) で年度を指定すると、その年の**承認済み（status=approved）** の証憑から以下を計算・表示する。
+
+- 損益計算書（勘定科目別の収益・経費、売上原価、青色申告特別控除、所得金額）
+- 貸借対照表（期首残高は事業者プロフィールから、期中の増減は仕訳から積み上げ。貸借が一致するか自動チェック）
+- 消費税申告書の試算（免税/本則課税/簡易課税/2割特例。`invoices.tax_class` で不課税・非課税の取引を除外できる）
+- 所得税（確定申告）の試算（所得控除・速算表・復興特別所得税・住民税/事業税概算）
+- CSVダウンロード（仕訳日記帳・総勘定元帳・消費税区分別集計。他の会計ソフトへの移行や税理士への提出用）
+
+これらの計算に必要な情報（氏名・屋号・申告区分・所得控除・期首残高・消費税の課税方式など）は [/profile.html](public/profile.html) の事業者プロフィール設定（年度ごと、`business_profiles`テーブル）で入力する。固定資産（減価償却費）は [/fixed-assets.html](public/fixed-assets.html) の台帳で管理し、所得税試算に自動反映される。
+
+**重要**: 税率・控除額・速算表は年度により改正される。ここでの計算結果はあくまで試算であり、実際の申告前には必ず国税庁の最新資料で確認すること（`src/tax/incomeTax.ts`, `src/accounting/depreciation.ts` のコメントにも同様の注意書きあり）。
 
 ## デプロイ（現在の本番構成）
 

@@ -157,6 +157,7 @@ const PATCHABLE_INVOICE_COLUMNS: Record<string, string> = {
   businessRatio: 'business_ratio',
   description: 'description',
   paymentMethod: 'payment_method',
+  taxClass: 'tax_class',
 };
 
 /** /api/invoices/:id/fx 専用。fx関連3カラムは汎用PATCHの許可リストに含めず、ここだけで書き込む。 */
